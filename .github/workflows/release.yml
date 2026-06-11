@@ -73,6 +73,7 @@ jobs:
 
       - name: Release summary
         if: steps.tauri.outputs.releaseHtmlUrl != ''
+        shell: bash
         run: |
           {
             echo "## Tauri Release"

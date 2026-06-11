@@ -40,7 +40,7 @@ pub struct AppState {
     pub vad_settings: Arc<Mutex<VadSettings>>,
     pub elapsed_secs: Arc<Mutex<f32>>,
     pub audio_duration_secs: Arc<Mutex<f32>>,
-    pub active_model: Arc<Mutex<String>>, // "sense-voice-small" | "paraformer"
+    pub active_model: Arc<Mutex<String>>, // "sense-voice-small" | "paraformer" | "qwen3-asr"
 }
 
 /// Build the ASR recognizer and Silero VAD from the configured model path.
@@ -59,6 +59,7 @@ fn build_models(
             match preferred {
                 "sense-voice-small" => engine::recognizer_factory::ModelType::SenseVoice,
                 "paraformer" => engine::recognizer_factory::ModelType::Paraformer,
+                "qwen3-asr" => engine::recognizer_factory::ModelType::Qwen3Asr,
                 _ => {
                     log::warn!("[build_models] unknown preferred model: {preferred}, auto-detecting");
                     return build_models(model_path, settings, None);
@@ -72,6 +73,8 @@ fn build_models(
         engine::recognizer_factory::ModelType::SenseVoice
     } else if available.contains(&"paraformer".to_string()) {
         engine::recognizer_factory::ModelType::Paraformer
+    } else if available.contains(&"qwen3-asr".to_string()) {
+        engine::recognizer_factory::ModelType::Qwen3Asr
     } else {
         return Err(format!(
             "No model found in {model_path}. Available: {available:?}"
@@ -297,20 +300,32 @@ pub fn run() {
     if crash_marker_path.exists() {
         if let Ok(crashed_model) = std::fs::read_to_string(&crash_marker_path) {
             log::warn!("[init] crash detected: model '{}' caused crash on last load, falling back", crashed_model);
-            let fallback = if crashed_model == "paraformer" { "sense-voice-small" } else { "paraformer" };
-            // Check if fallback model is available
-            let fallback_dir = std::path::Path::new(&initial_config.model_path).join(fallback);
-            let fallback_available = if fallback == "paraformer" {
-                engine::model_manager::is_paraformer_installed_at(&fallback_dir)
-            } else {
-                engine::model_manager::is_model_installed_at(&fallback_dir)
+            // Try fallback models in priority order (SenseVoice is most reliable)
+            let fallbacks = match crashed_model.as_str() {
+                "paraformer" => vec!["sense-voice-small", "qwen3-asr"],
+                "qwen3-asr" => vec!["sense-voice-small", "paraformer"],
+                _ => vec!["sense-voice-small", "paraformer", "qwen3-asr"],
             };
-            if fallback_available {
-                initial_config.active_model = fallback.to_string();
-                let _ = AppConfig::save(&initial_config);
-                log::info!("[init] switched to fallback model: {fallback}");
-            } else {
-                log::warn!("[init] fallback model {fallback} not available, will try original model anyway");
+            let mut switched = false;
+            for fallback in &fallbacks {
+                let fallback_dir = std::path::Path::new(&initial_config.model_path).join(fallback);
+                let available = if *fallback == "paraformer" {
+                    engine::model_manager::is_paraformer_installed_at(&fallback_dir)
+                } else if *fallback == "qwen3-asr" {
+                    engine::model_manager::is_qwen3_asr_installed_at(&fallback_dir)
+                } else {
+                    engine::model_manager::is_model_installed_at(&fallback_dir)
+                };
+                if available {
+                    initial_config.active_model = fallback.to_string();
+                    let _ = AppConfig::save(&initial_config);
+                    log::info!("[init] switched to fallback model: {fallback}");
+                    switched = true;
+                    break;
+                }
+            }
+            if !switched {
+                log::warn!("[init] no fallback model available, will try original model anyway");
             }
         }
         let _ = std::fs::remove_file(&crash_marker_path);

@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [v0.1.2] - 2026-06-11
 
 ### Added
+- **Qwen3-ASR 0.6B int8 model support** (`sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25`): 30+ languages including Chinese, English, Cantonese, Japanese, Korean, Arabic, German, French, Spanish, and more. Downloaded from gitcode.com (`https://gitcode.com/tabortao/VelociText/releases/download/model/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.zip`), ~450MB int8 quantized. Requires `conv_frontend.onnx`, `encoder.int8.onnx`, `decoder.int8.onnx`, and `tokenizer/` directory
+- **Model download from gitcode.com**: all Paraformer and Qwen3-ASR models now download from gitcode.com for fast access in China
 - **Full transcription feature parity with sherpa-onnx official Tauri example**: `non-streaming-speech-recognition-from-file`
 - Pure Rust audio/video decoding via `symphonia` crate — no FFmpeg required for basic transcription
   - Supports all major formats: MP3, FLAC, AAC, OGG, WAV, MP4, MKV, WebM, AIFF, M4A
@@ -79,7 +81,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`download_specific_model` Paraformer check**: now verifies `tokens.txt` format (not just file existence) before skipping download, ensuring broken models get re-downloaded
 - **Tar entry borrow checker error (E0505)**: fixed by extracting path string into a separate scope before moving the entry for content reading
 - **`config_arc` undefined variable**: replaced with direct `Mutex::new(initial_config)` since config fields are cloned before the init thread
-- **`set_active_model` return type**: changed from `Result<String, String>` to `Result<(), String>` since `app_handle.restart()` never returns
+- `set_active_model` return type: changed from `Result<String, String>` to `Result<(), String>` since `app_handle.restart()` never returns
+- **GitHub Actions release workflow**: fixed PowerShell string parsing error in release summary step by specifying `shell: bash` for the heredoc block
 - Updated About page tech stack description: replaced "FFmpeg for audio/video decoding" with "symphonia for pure Rust audio/video decoding"
 - **Video file transcription**: fixed symphonia selecting video codec track instead of audio track in video files. Restricted symphonia to audio-only features (mp3, aac, flac, vorbis, wav, ogg, isomp4, mkv, pcm, adpcm, aiff, caf) matching the official sherpa-onnx Tauri example. Removed overly strict `sample_rate`/`channels` presence check that incorrectly skipped audio tracks in MP4/MKV containers where these fields are not populated during probe phase.
 - **Video file audio sample rate detection**: fixed incorrect sample rate and channel count for video files. MP4/MKV containers often do not report `sample_rate` and `channels` in `codec_params` during the probe phase, causing the pipeline to default to 16000 Hz / 1 channel. This meant the resampler was never created for 44100/48000 Hz audio, resulting in garbled or empty ASR output. Now the actual sample rate and channel count are determined from the first decoded `AudioBufferRef` frame, and the resampler is created lazily with the correct rate.

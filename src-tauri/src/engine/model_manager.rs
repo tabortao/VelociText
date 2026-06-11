@@ -98,6 +98,17 @@ pub fn is_model_installed_at(dir: &Path) -> bool {
     find_model_file(dir).is_some() && dir.join("tokens.txt").exists()
 }
 
+/// Check if Qwen3-ASR model is installed at the given directory.
+pub fn is_qwen3_asr_installed_at(dir: &Path) -> bool {
+    let has_conv_frontend = dir.join("conv_frontend.onnx").exists();
+    let has_encoder = dir.join("encoder.int8.onnx").exists()
+        || dir.join("encoder.onnx").exists();
+    let has_decoder = dir.join("decoder.int8.onnx").exists()
+        || dir.join("decoder.onnx").exists();
+    let has_tokenizer = dir.join("tokenizer").exists();
+    has_conv_frontend && has_encoder && has_decoder && has_tokenizer
+}
+
 /// 模型管理器
 pub struct ModelManager {
     models_dir: String,
@@ -115,6 +126,9 @@ impl ModelManager {
 
         let paraformer_path = Path::new(&self.models_dir).join("paraformer");
         let paraformer_installed = is_paraformer_installed_at(&paraformer_path);
+
+        let qwen3_asr_path = Path::new(&self.models_dir).join("qwen3-asr");
+        let qwen3_asr_installed = is_qwen3_asr_installed_at(&qwen3_asr_path);
 
         let silero_vad_path = Path::new(&self.models_dir).join("silero-vad");
         let silero_vad_installed = is_silero_vad_installed_at(&silero_vad_path);
@@ -138,6 +152,17 @@ impl ModelManager {
                 installed: paraformer_installed,
                 path: if paraformer_installed {
                     Some(paraformer_path.to_string_lossy().to_string())
+                } else {
+                    None
+                },
+            },
+            ModelInfo {
+                name: "qwen3-asr".into(),
+                display_name: "Qwen3-ASR (0.6B)".into(),
+                size: "~450MB (int8)".into(),
+                installed: qwen3_asr_installed,
+                path: if qwen3_asr_installed {
+                    Some(qwen3_asr_path.to_string_lossy().to_string())
                 } else {
                     None
                 },
@@ -451,6 +476,139 @@ impl ModelManager {
 
         on_progress(DownloadProgress {
             model_name: "paraformer".into(),
+            downloaded: 100,
+            total: 100,
+            percentage: 100.0,
+            stage: "completed".into(),
+        });
+
+        Ok(model_dir.to_string_lossy().to_string())
+    }
+
+    /// Download Qwen3-ASR 0.6B int8 model.
+    ///
+    /// Downloads from gitcode.com and extracts `conv_frontend.onnx`, `encoder.int8.onnx`,
+    /// `decoder.int8.onnx`, and the `tokenizer/` directory to `qwen3-asr/`.
+    ///
+    /// Users can also manually place model files in the `qwen3-asr/` directory:
+    /// - `conv_frontend.onnx` — convolutional frontend
+    /// - `encoder.int8.onnx` — encoder model
+    /// - `decoder.int8.onnx` — decoder model
+    /// - `tokenizer/` — tokenizer directory
+    pub fn download_qwen3_asr(
+        &self,
+        on_progress: &dyn Fn(DownloadProgress),
+    ) -> AppResult<String> {
+        let model_dir = Path::new(&self.models_dir).join("qwen3-asr");
+        std::fs::create_dir_all(&model_dir)?;
+
+        // Check if already installed
+        if is_qwen3_asr_installed_at(&model_dir) {
+            on_progress(DownloadProgress {
+                model_name: "qwen3-asr".into(),
+                downloaded: 100,
+                total: 100,
+                percentage: 100.0,
+                stage: "completed".into(),
+            });
+            return Ok(model_dir.to_string_lossy().to_string());
+        }
+
+        // Download zip from gitcode.com
+        let archive_url = "https://gitcode.com/tabortao/VelociText/releases/download/model/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.zip";
+
+        on_progress(DownloadProgress {
+            model_name: "qwen3-asr".into(),
+            downloaded: 0,
+            total: 0,
+            percentage: 0.0,
+            stage: "Downloading Qwen3-ASR model archive...".into(),
+        });
+
+        let temp_dir = std::env::temp_dir();
+        let archive_path = temp_dir.join("qwen3-asr.zip");
+
+        download_file(archive_url, &archive_path, "qwen3-asr", on_progress)?;
+
+        on_progress(DownloadProgress {
+            model_name: "qwen3-asr".into(),
+            downloaded: 100,
+            total: 100,
+            percentage: 90.0,
+            stage: "Extracting...".into(),
+        });
+
+        // Extract zip
+        let file = std::fs::File::open(&archive_path)
+            .map_err(|e| AppError::ModelDownload(format!("Open archive failed: {}", e)))?;
+        let mut archive = zip::ZipArchive::new(file)
+            .map_err(|e| AppError::ModelDownload(format!("Read zip archive failed: {}", e)))?;
+
+        for i in 0..archive.len() {
+            let mut entry = archive.by_index(i)
+                .map_err(|e| AppError::ModelDownload(format!("Read zip entry failed: {}", e)))?;
+
+            let name = entry.name().to_string();
+            // Skip directories
+            if entry.is_dir() {
+                continue;
+            }
+
+            // Extract filename from path, preserving subdirectory structure for tokenizer/
+            let entry_path = std::path::Path::new(&name);
+            let filename = entry_path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+
+            // We need: conv_frontend.onnx, encoder.int8.onnx, decoder.int8.onnx, and tokenizer/* files
+            let is_model_file = filename == "conv_frontend.onnx"
+                || filename == "encoder.int8.onnx"
+                || filename == "encoder.onnx"
+                || filename == "decoder.int8.onnx"
+                || filename == "decoder.onnx";
+
+            let is_tokenizer_file = name.contains("tokenizer/") || name.contains("tokenizer\\");
+
+            if is_model_file || is_tokenizer_file {
+                // For tokenizer files, preserve relative path inside tokenizer/
+                let dest = if is_tokenizer_file {
+                    // Strip leading directory prefix to get relative path under tokenizer/
+                    let relative = if let Some(idx) = name.find("tokenizer") {
+                        &name[idx..] // "tokenizer/..." or "subdir/tokenizer/..."
+                    } else {
+                        &filename
+                    };
+                    model_dir.join(relative)
+                } else {
+                    model_dir.join(&filename)
+                };
+
+                if let Some(parent) = dest.parent() {
+                    std::fs::create_dir_all(parent)
+                        .map_err(|e| AppError::ModelDownload(format!("Create dir failed: {}", e)))?;
+                }
+
+                let mut file_content = Vec::new();
+                std::io::Read::read_to_end(&mut entry, &mut file_content)
+                    .map_err(|e| AppError::ModelDownload(format!("Read entry failed: {}", e)))?;
+                std::fs::write(&dest, &file_content)
+                    .map_err(|e| AppError::ModelDownload(format!("Write file failed: {}", e)))?;
+                log::info!("[download_qwen3_asr] extracted {} -> {}", name, dest.display());
+            }
+        }
+
+        // Clean up archive
+        let _ = std::fs::remove_file(&archive_path);
+
+        if !is_qwen3_asr_installed_at(&model_dir) {
+            return Err(AppError::ModelDownload(
+                "Download completed but model file check failed".into(),
+            ));
+        }
+
+        on_progress(DownloadProgress {
+            model_name: "qwen3-asr".into(),
             downloaded: 100,
             total: 100,
             percentage: 100.0,

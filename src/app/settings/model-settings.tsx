@@ -115,11 +115,12 @@ export function ModelSettingsPage() {
   const modelDescriptions: Record<string, string> = {
     "sense-voice-small": t("models.senseVoiceDesc"),
     "paraformer": t("models.paraformerDesc"),
+    "qwen3-asr": t("models.qwen3AsrDesc"),
     "silero-vad": t("models.sileroVadDesc"),
   }
 
   // ASR models that can be switched
-  const asrModels = ["sense-voice-small", "paraformer"]
+  const asrModels = ["sense-voice-small", "paraformer", "qwen3-asr"]
 
   return (
     <div className="px-4 lg:px-6 space-y-4">
@@ -222,7 +223,21 @@ export function ModelSettingsPage() {
                 {model.name === "paraformer" && !isInstalled && (
                   <div className="mt-2 text-xs text-muted-foreground border-t pt-2">
                     <a
-                      href="https://gitcode.com/tabortao/VelociText/releases/download/v0.1.2/paraformer.zip"
+                      href="https://gitcode.com/tabortao/VelociText/releases/v0.1.2/paraformer.zip"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline hover:text-foreground"
+                    >
+                      {t("models.manualDownload")}
+                    </a>
+                    <span className="mx-1">·</span>
+                    <span>{t("models.manualHint")}</span>
+                  </div>
+                )}
+                {model.name === "qwen3-asr" && !isInstalled && (
+                  <div className="mt-2 text-xs text-muted-foreground border-t pt-2">
+                    <a
+                      href="https://gitcode.com/tabortao/VelociText/releases/download/model/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.zip"
                       target="_blank"
                       rel="noopener noreferrer"
                       className="underline hover:text-foreground"

@@ -1,8 +1,8 @@
 use crate::errors::{AppError, AppResult};
 use serde::{Deserialize, Serialize};
 use sherpa_onnx::{
-    OfflineModelConfig, OfflineParaformerModelConfig, OfflineRecognizer,
-    OfflineRecognizerConfig, OfflineSenseVoiceModelConfig,
+    OfflineModelConfig, OfflineParaformerModelConfig, OfflineQwen3ASRModelConfig,
+    OfflineRecognizer, OfflineRecognizerConfig, OfflineSenseVoiceModelConfig,
     OfflineTransducerModelConfig, OfflineZipformerCtcModelConfig,
 };
 use std::path::Path;
@@ -16,8 +16,10 @@ use std::path::Path;
 pub enum ModelType {
     /// SenseVoice series (Small, Large) — multilingual ASR
     SenseVoice,
-    /// Paraformer — Mandarin ASR
+    /// Paraformer — Mandarin/Cantonese/English ASR
     Paraformer,
+    /// Qwen3-ASR — 0.6B multilingual ASR (30+ languages)
+    Qwen3Asr,
     /// Zipformer CTC — English/Multilingual ASR with CTC
     ZipformerCtc,
     /// Transducer (e.g., Zipformer transducer, Conformer) — general ASR
@@ -30,6 +32,7 @@ impl ModelType {
         match self {
             ModelType::SenseVoice => "sense-voice-small",
             ModelType::Paraformer => "paraformer",
+            ModelType::Qwen3Asr => "qwen3-asr",
             ModelType::ZipformerCtc => "zipformer-ctc",
             ModelType::Transducer => "transducer",
         }
@@ -40,6 +43,7 @@ impl ModelType {
         match self {
             ModelType::SenseVoice => &["model.onnx", "model.int8.onnx", "model_q8.onnx"],
             ModelType::Paraformer => &["model.onnx", "model.int8.onnx"],
+            ModelType::Qwen3Asr => &["encoder.int8.onnx", "encoder.onnx"],
             ModelType::ZipformerCtc => &["model.onnx", "model.int8.onnx"],
             ModelType::Transducer => &["encoder.onnx", "decoder.onnx", "joiner.onnx"],
         }
@@ -50,6 +54,7 @@ impl ModelType {
         match self {
             ModelType::SenseVoice => "SenseVoice-Small",
             ModelType::Paraformer => "Paraformer",
+            ModelType::Qwen3Asr => "Qwen3-ASR",
             ModelType::ZipformerCtc => "Zipformer CTC",
             ModelType::Transducer => "Transducer",
         }
@@ -109,10 +114,16 @@ impl RecognizerFactory {
                 ))
             })?;
 
-        let tokens_file = base.join("tokens.txt");
+        // Qwen3-ASR needs a tokenizer directory, not a tokens.txt file
+        let tokens_file = if matches!(model_type, ModelType::Qwen3Asr) {
+            base.join("tokenizer")
+        } else {
+            base.join("tokens.txt")
+        };
         if !tokens_file.exists() {
             return Err(AppError::ModelLoad(format!(
-                "tokens.txt not found in: {}",
+                "{} not found in: {}",
+                if matches!(model_type, ModelType::Qwen3Asr) { "tokenizer directory" } else { "tokens.txt" },
                 base.display()
             )));
         }
@@ -124,7 +135,7 @@ impl RecognizerFactory {
             tokens_file.display()
         );
 
-        let model_config = Self::build_model_config(model_type, &model_file, config);
+        let model_config = Self::build_model_config(model_type, &model_file, &base, config);
 
         let recognizer_config = OfflineRecognizerConfig {
             model_config,
@@ -141,10 +152,10 @@ impl RecognizerFactory {
     }
 
     /// Build the model-specific configuration.
-    fn build_model_config(model_type: &ModelType, model_file: &Path, config: &RecognizerConfig) -> OfflineModelConfig {
+    fn build_model_config(model_type: &ModelType, model_file: &Path, base: &Path, config: &RecognizerConfig) -> OfflineModelConfig {
         let model_path = model_file.to_string_lossy().to_string();
-        let parent = model_file.parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-        let tokens_path = Path::new(&parent).join("tokens.txt").to_string_lossy().to_string();
+        let _base_str = base.to_string_lossy().to_string();
+        let tokens_path = base.join("tokens.txt").to_string_lossy().to_string();
 
         match model_type {
             ModelType::SenseVoice => OfflineModelConfig {
@@ -169,6 +180,30 @@ impl RecognizerFactory {
                 ..Default::default()
             },
 
+            ModelType::Qwen3Asr => {
+                // Qwen3-ASR requires conv_frontend.onnx, encoder.int8.onnx, decoder.int8.onnx, and tokenizer/
+                let conv_frontend_path = base.join("conv_frontend.onnx").to_string_lossy().to_string();
+                let decoder_path = base.join("decoder.int8.onnx").to_string_lossy().to_string();
+                let tokenizer_dir = base.join("tokenizer").to_string_lossy().to_string();
+
+                OfflineModelConfig {
+                    qwen3_asr: OfflineQwen3ASRModelConfig {
+                        conv_frontend: Some(conv_frontend_path),
+                        encoder: Some(model_path),
+                        decoder: Some(decoder_path),
+                        tokenizer: Some(tokenizer_dir),
+                        max_total_len: 512,
+                        max_new_tokens: 512,
+                        temperature: 1e-6,
+                        top_p: 0.8,
+                        seed: 42,
+                        hotwords: config.hotwords_file.clone(),
+                    },
+                    num_threads: config.num_threads as i32,
+                    ..Default::default()
+                }
+            },
+
             ModelType::ZipformerCtc => OfflineModelConfig {
                 zipformer_ctc: OfflineZipformerCtcModelConfig {
                     model: Some(model_path),
@@ -181,7 +216,6 @@ impl RecognizerFactory {
 
             ModelType::Transducer => {
                 // Transducer uses encoder/decoder/joiner triplet
-                let base = model_file.parent().unwrap_or(Path::new("."));
                 OfflineModelConfig {
                     transducer: OfflineTransducerModelConfig {
                         encoder: Some(base.join("encoder.onnx").to_string_lossy().to_string()),
@@ -207,6 +241,7 @@ impl RecognizerFactory {
         let all_types = [
             ModelType::SenseVoice,
             ModelType::Paraformer,
+            ModelType::Qwen3Asr,
             ModelType::ZipformerCtc,
             ModelType::Transducer,
         ];
