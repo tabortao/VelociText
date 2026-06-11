@@ -18,6 +18,9 @@ pub struct AppConfig {
     /// 活跃 ASR 模型: "sense-voice-small" | "paraformer"
     #[serde(default = "default_active_model")]
     pub active_model: String,
+    /// 侧边栏是否收起
+    #[serde(default)]
+    pub sidebar_collapsed: bool,
 }
 
 fn default_active_model() -> String {
@@ -35,6 +38,7 @@ impl Default for AppConfig {
             use_vad: true,
             ffmpeg_path: None,
             active_model: default_active_model(),
+            sidebar_collapsed: false,
         }
     }
 }

@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [v0.1.2] - 2026-06-11
 
 ### Added
+- **Dictionary Panel**: unified hotwords and text replacement management for all ASR models (SenseVoice-Small, Paraformer-Large, Qwen3-ASR)
+  - **Hotwords tab**: add proper nouns (names, places, brands) with adjustable weights (0.0–10.0) to boost ASR recognition accuracy. Changes trigger automatic model rebuild via sherpa-onnx `hotwords_file` + `hotwords_score`
+  - **Replacements tab**: define post-processing text replacement rules (original → replacement) to correct commonly misrecognized words. Applied at the `get_recognition_progress` level so all downstream consumers (display, copy, export) receive corrected text
+  - Dictionary configuration persisted to `AppData\Roaming\VelociText\dictionary.json`, hotwords file generated as `hotwords.txt` in standard `word weight` format
+  - **Dedicated dictionary page** in the left sidebar navigation (below "转录"), with full i18n support (Chinese and English)
+- **Sidebar state persistence**: collapsed/expanded state is now saved to `config.json` (`sidebarCollapsed` field) and restored on next launch
 - **Qwen3-ASR 0.6B int8 model support** (`sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25`): 30+ languages including Chinese, English, Cantonese, Japanese, Korean, Arabic, German, French, Spanish, and more. Downloaded from gitcode.com (`https://gitcode.com/tabortao/VelociText/releases/download/model/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.zip`), ~450MB int8 quantized. Requires `conv_frontend.onnx`, `encoder.int8.onnx`, `decoder.int8.onnx`, and `tokenizer/` directory
 - **Model download from gitcode.com**: all Paraformer and Qwen3-ASR models now download from gitcode.com for fast access in China
 - **Full transcription feature parity with sherpa-onnx official Tauri example**: `non-streaming-speech-recognition-from-file`
@@ -74,6 +80,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed `build_models` dir_name mismatch: was checking `"paraformer-large"` but `ModelType::Paraformer.dir_name()` returns `"paraformer"`
 
 ### Fixed
+- **Dictionary hotwords model rebuild crash**: fixed cascading failure when model creation with hotwords fails — fallback models no longer inherit the hotwords file, preventing double failure. Added rollback mechanism: if `rebuild_recognizer` fails, dictionary config is reverted to previous state and the hotwords file path is cleared
+- **Cannot clear/delete hotwords**: fixed `disabled` condition on Save button that prevented saving empty hotwords list; clearing all hotwords now correctly skips model rebuild. Frontend now reloads dictionary config from backend after both successful and failed saves, ensuring UI stays in sync with persisted state
 - **Paraformer model crash on load**: switched download source from ModelScope iic (FunASR native ONNX, incompatible with sherpa-onnx) to official sherpa-onnx GitHub releases (`sherpa-onnx-paraformer-trilingual-zh-cantonese-en.tar.bz2`). FunASR native ONNX models lack the metadata and input/output names that sherpa-onnx expects, causing ONNX Runtime to abort the process
 - **Model upgraded to Trilingual Paraformer** (`csukuangfj/sherpa-onnx-paraformer-trilingual-zh-cantonese-en`): supports Chinese, English, and Cantonese (粤语), int8 quantized ~233MB. Downloaded from gitcode.com (`https://gitcode.com/tabortao/VelociText/releases/download/v0.1.2/paraformer.zip`) for fast download in China; users can also manually download and extract `model.int8.onnx` + `tokens.txt` to the `paraformer/` directory
 - **Crash recovery mechanism**: added `.model_loading` marker file — if the app crashes during model initialization, the next startup detects the marker and automatically falls back to the other available model

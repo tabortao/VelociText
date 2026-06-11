@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/sidebar"
 import {
   MicIcon,
+  BookOpenIcon,
   Settings2Icon,
   CpuIcon,
   InfoIcon,
@@ -34,6 +35,7 @@ const labels = {
   zh: {
     features: "功能",
     transcribe: "转录",
+    dictionary: "词典",
     settingsLabel: "设置",
     settings: "设置",
     models: "模型管理",
@@ -42,6 +44,7 @@ const labels = {
   en: {
     features: "Features",
     transcribe: "Transcribe",
+    dictionary: "Dictionary",
     settingsLabel: "Settings",
     settings: "Settings",
     models: "Models",
@@ -64,6 +67,7 @@ export function AppSidebar({
 
   const mainNav = [
     { id: "transcribe" as Page, title: l.transcribe, icon: MicIcon },
+    { id: "dictionary" as Page, title: l.dictionary, icon: BookOpenIcon },
   ]
 
   const settingsNav = [

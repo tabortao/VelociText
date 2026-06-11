@@ -16,6 +16,7 @@ const dict = {
 
     // SiteHeader
     "header.transcribe": "转录",
+    "header.dictionary": "词典",
     "header.history": "历史记录",
     "header.settings": "设置",
     "header.model-settings": "模型管理",
@@ -141,6 +142,33 @@ const dict = {
     "transcribing_done": "转录完成",
     "batch_processing": "批量处理中...",
     "batch_complete": "批量转录完成",
+
+    // Dictionary
+    "dictionary.title": "词典",
+    "dictionary.desc": "添加专有名词和替换规则以提高识别准确率",
+    "dictionary.hotwords": "专有名词",
+    "dictionary.hotwordsDesc": "添加人名、地名、品牌等专有名词，提高语音识别准确率。每行一个词，可设置权重。",
+    "dictionary.replacements": "替换词典",
+    "dictionary.replacementsDesc": "识别结果中的文本替换规则。如将识别错误的词替换为正确写法。",
+    "dictionary.word": "词语",
+    "dictionary.weight": "权重",
+    "dictionary.original": "原文",
+    "dictionary.replacement": "替换为",
+    "dictionary.add": "添加",
+    "dictionary.remove": "删除",
+    "dictionary.save": "保存",
+    "dictionary.saving": "保存中...",
+    "dictionary.saved": "已保存",
+    "dictionary.rebuilding": "正在重建模型...",
+    "dictionary.empty": "暂无条目",
+    "dictionary.emptyHotwords": "暂无专有名词，点击上方添加",
+    "dictionary.emptyReplacements": "暂无替换规则，点击上方添加",
+    "dictionary.weightHint": "权重 (0.0-10.0)，越高越优先",
+    "dictionary.wordPlaceholder": "输入专有名词",
+    "dictionary.originalPlaceholder": "输入待替换文本",
+    "dictionary.replacementPlaceholder": "输入替换后文本",
+    "dictionary.hotwordSaved": "热词已保存，模型正在重建...",
+    "dictionary.replacementSaved": "替换规则已保存",
   },
   en: {
     // Sidebar
@@ -154,6 +182,7 @@ const dict = {
 
     // SiteHeader
     "header.transcribe": "Transcribe",
+    "header.dictionary": "Dictionary",
     "header.history": "History",
     "header.settings": "Settings",
     "header.model-settings": "Models",
@@ -279,6 +308,33 @@ const dict = {
     "transcribing_done": "Transcription complete",
     "batch_processing": "Processing batch...",
     "batch_complete": "Batch transcription complete",
+
+    // Dictionary
+    "dictionary.title": "Dictionary",
+    "dictionary.desc": "Add proper nouns and replacement rules to improve recognition accuracy",
+    "dictionary.hotwords": "Hotwords",
+    "dictionary.hotwordsDesc": "Add proper nouns like names, places, brands to boost recognition accuracy. One word per line, with adjustable weight.",
+    "dictionary.replacements": "Replacements",
+    "dictionary.replacementsDesc": "Post-processing text replacement rules. Replace incorrectly recognized words with correct spellings.",
+    "dictionary.word": "Word",
+    "dictionary.weight": "Weight",
+    "dictionary.original": "Original",
+    "dictionary.replacement": "Replacement",
+    "dictionary.add": "Add",
+    "dictionary.remove": "Remove",
+    "dictionary.save": "Save",
+    "dictionary.saving": "Saving...",
+    "dictionary.saved": "Saved",
+    "dictionary.rebuilding": "Rebuilding model...",
+    "dictionary.empty": "No entries",
+    "dictionary.emptyHotwords": "No hotwords yet, add one above",
+    "dictionary.emptyReplacements": "No replacement rules yet, add one above",
+    "dictionary.weightHint": "Weight (0.0-10.0), higher = more priority",
+    "dictionary.wordPlaceholder": "Enter a proper noun",
+    "dictionary.originalPlaceholder": "Enter text to replace",
+    "dictionary.replacementPlaceholder": "Enter replacement text",
+    "dictionary.hotwordSaved": "Hotwords saved, rebuilding model...",
+    "dictionary.replacementSaved": "Replacement rules saved",
   },
 }
 

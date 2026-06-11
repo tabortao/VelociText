@@ -642,9 +642,26 @@ pub fn recognize_file(path: String, state: State<'_, AppState>) -> Result<(), St
 pub fn get_recognition_progress(state: State<'_, AppState>) -> Result<ProcessingState, String> {
     let percent = state.progress.load(Ordering::Relaxed);
     let status = state.status.lock().map_err(|e| e.to_string())?.clone();
-    let segments = state.segments.lock().map_err(|e| e.to_string())?.clone();
+    let raw_segments = state.segments.lock().map_err(|e| e.to_string())?.clone();
     let elapsed_secs = *state.elapsed_secs.lock().map_err(|e| e.to_string())?;
     let audio_duration_secs = *state.audio_duration_secs.lock().map_err(|e| e.to_string())?;
+
+    // Apply text replacements from dictionary config
+    let segments: Vec<SegmentResult> = {
+        let dict_config = state.dictionary_config.lock().map_err(|e| e.to_string())?;
+        if dict_config.replacements.is_empty() {
+            raw_segments
+        } else {
+            raw_segments
+                .into_iter()
+                .map(|s| SegmentResult {
+                    text: dict_config.apply_replacements(&s.text),
+                    ..s
+                })
+                .collect()
+        }
+    };
+
     Ok(ProcessingState {
         percent,
         status,
@@ -742,6 +759,7 @@ pub fn apply_vad_settings(
     let init_error = Arc::clone(&state.init_error);
     let init_num_threads = Arc::clone(&state.num_threads);
     let active_model_arc = Arc::clone(&state.active_model);
+    let hotwords_file = state.hotwords_file_path.lock().map(|h| h.clone()).unwrap_or(None);
     let model_path = {
         let config = state.config.lock().map_err(|e| e.to_string())?;
         config.model_path.clone()
@@ -751,7 +769,7 @@ pub fn apply_vad_settings(
         log::info!("[apply_settings] rebuilding models with new settings...");
         let active = active_model_arc.lock().map(|a| a.clone()).unwrap_or_default();
         let preferred = if active.is_empty() { None } else { Some(active.as_str()) };
-        match crate::build_models(&model_path, &new_settings, preferred) {
+        match crate::build_models(&model_path, &new_settings, preferred, hotwords_file) {
             Ok((rec, vad, threads, model_name)) => {
                 log::info!("[apply_settings] models rebuilt, num_threads={threads}, active_model={model_name}");
                 let r_ok = recognizer_arc.lock().map(|mut r| { *r = Some(rec); }).is_ok();

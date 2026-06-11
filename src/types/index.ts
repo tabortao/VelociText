@@ -66,6 +66,7 @@ export interface AppConfig {
   useVad: boolean;
   ffmpegPath: string | null;
   activeModel: string;
+  sidebarCollapsed: boolean;
 }
 
 /** 模型下载进度 */
@@ -154,4 +155,26 @@ export interface VadSettings {
   minSpeechDuration: number;
   maxSpeechDuration: number;
   numThreads: number;
+}
+
+// ============================================================================
+// 词典类型
+// ============================================================================
+
+/** 热词条目 */
+export interface HotwordEntry {
+  word: string;
+  weight: number;
+}
+
+/** 替换条目 */
+export interface ReplacementEntry {
+  original: string;
+  replacement: string;
+}
+
+/** 词典配置 */
+export interface DictionaryConfig {
+  hotwords: HotwordEntry[];
+  replacements: ReplacementEntry[];
 }

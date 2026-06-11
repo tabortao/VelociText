@@ -9,4 +9,5 @@
 - [X] 增加qwen3-asr模型支持
 - [X] [sherpa-onnx模型下载地址1](https://gitcode.com/tabortao/VelociText/releases/model)
 - [ ] [sherpa-onnx模型下载地址2](https://www.modelscope.cn/models/tabortao/sherpa-onnx-asr-int8/summary)，自己从sherpa-onnx收集整理的模型，上传到modelscope方便在项目中下载使用。AI建议推荐保持现有方案，暂不切换下载链接。 Qwen3-ASR 的 tokenizer/ 目录有 30+ 个文件，ModelScope 逐个下载会非常脆弱且慢。单 zip 下载解压更稳定。如果 gitcode.com 未来出现可用性问题，再切换到 ModelScope 方案。我目前在modelscope也上传了zip压缩文件，有问题了后面替换。进入到要下载的zip文件后，可以复制到下载地址，例如https://www.modelscope.cn/models/tabortao/sherpa-onnx-asr-int8/resolve/master/sherpa-onnx-paraformer-trilingual-zh-cantonese-en-int8.zip
+- [ ] 项目VAD功能，各个模型是否都用了 [silero-vad](https://k2-fsa.github.io/sherpa/onnx/vad/silero-vad.html) 模型。
 

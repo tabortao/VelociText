@@ -8,6 +8,7 @@ mod models;
 mod tests;
 
 use config::app_config::AppConfig;
+use config::dictionary_config::DictionaryConfig;
 use engine::recognizer_factory::RecognizerFactory;
 use engine::transcriber::Transcriber;
 use engine::transcription_pipeline::{SegmentResult, VadSettings};
@@ -41,6 +42,8 @@ pub struct AppState {
     pub elapsed_secs: Arc<Mutex<f32>>,
     pub audio_duration_secs: Arc<Mutex<f32>>,
     pub active_model: Arc<Mutex<String>>, // "sense-voice-small" | "paraformer" | "qwen3-asr"
+    pub dictionary_config: Arc<Mutex<DictionaryConfig>>,
+    pub hotwords_file_path: Arc<Mutex<Option<String>>>,
 }
 
 /// Build the ASR recognizer and Silero VAD from the configured model path.
@@ -49,6 +52,7 @@ fn build_models(
     model_path: &str,
     settings: &VadSettings,
     preferred_model: Option<&str>,
+    hotwords_file: Option<String>,
 ) -> Result<(OfflineRecognizer, sherpa_onnx::VoiceActivityDetector, u32, String), String> {
     // Find available model
     let available = RecognizerFactory::list_available(model_path);
@@ -62,12 +66,12 @@ fn build_models(
                 "qwen3-asr" => engine::recognizer_factory::ModelType::Qwen3Asr,
                 _ => {
                     log::warn!("[build_models] unknown preferred model: {preferred}, auto-detecting");
-                    return build_models(model_path, settings, None);
+                    return build_models(model_path, settings, None, hotwords_file);
                 }
             }
         } else {
             log::warn!("[build_models] preferred model {preferred} not available, auto-detecting");
-            return build_models(model_path, settings, None);
+            return build_models(model_path, settings, None, hotwords_file);
         }
     } else if available.contains(&"sense-voice-small".to_string()) {
         engine::recognizer_factory::ModelType::SenseVoice
@@ -119,7 +123,7 @@ fn build_models(
     let config = engine::recognizer_factory::RecognizerConfig {
         model_dir: model_dir_str.clone(),
         num_threads: effective_settings.num_threads as u32,
-        hotwords_file: None,
+        hotwords_file: hotwords_file.clone(),
         hotwords_score: 1.5,
         use_itn: true,
     };
@@ -181,6 +185,7 @@ fn build_models(
             match fallback_type {
                 Some(ft) => {
                     let fb_dir = Path::new(model_path).join(ft.dir_name());
+                    // Don't pass hotwords to fallback — avoid cascading failure
                     let fb_config = engine::recognizer_factory::RecognizerConfig {
                         model_dir: fb_dir.to_string_lossy().to_string(),
                         num_threads: settings.num_threads as u32,
@@ -231,6 +236,7 @@ fn build_models(
             match fallback_type {
                 Some(ft) => {
                     let fb_dir = Path::new(model_path).join(ft.dir_name());
+                    // Don't pass hotwords to fallback — avoid cascading failure
                     let fb_config = engine::recognizer_factory::RecognizerConfig {
                         model_dir: fb_dir.to_string_lossy().to_string(),
                         num_threads: settings.num_threads as u32,
@@ -370,6 +376,21 @@ pub fn run() {
     }
 
     // Build streaming state
+    let dictionary_config = Arc::new(Mutex::new(DictionaryConfig::load()));
+    let hotwords_file_path: Arc<Mutex<Option<String>>> = {
+        let dc = dictionary_config.lock().unwrap();
+        if dc.hotwords.is_empty() {
+            Arc::new(Mutex::new(None))
+        } else {
+            match dc.generate_hotwords_file() {
+                Ok(path) => Arc::new(Mutex::new(Some(path))),
+                Err(e) => {
+                    log::warn!("[init] failed to generate hotwords file: {e}");
+                    Arc::new(Mutex::new(None))
+                }
+            }
+        }
+    };
     let recognizer = Arc::new(Mutex::new(None::<OfflineRecognizer>));
     let vad_detector = Arc::new(Mutex::new(None::<sherpa_onnx::VoiceActivityDetector>));
     let init_status = Arc::new(AtomicU8::new(0)); // 0 = pending
@@ -388,6 +409,8 @@ pub fn run() {
     let init_model_path = initial_config.model_path.clone();
     let init_active_model_arc = Arc::clone(&active_model);
     let init_active_model = initial_config.active_model.clone();
+    let init_hotwords_file_path = hotwords_file_path.lock().unwrap().clone();
+    let _init_dictionary_config = Arc::clone(&dictionary_config);
 
     // Background thread: load models
     std::thread::spawn(move || {
@@ -402,7 +425,7 @@ pub fn run() {
         }
         let _ = std::fs::write(&marker_path, &init_active_model);
 
-        match build_models(&init_model_path, &settings, preferred) {
+        match build_models(&init_model_path, &settings, preferred, init_hotwords_file_path) {
             Ok((rec, vad, threads, model_name)) => {
                 // Model loaded successfully — remove crash marker
                 let _ = std::fs::remove_file(&marker_path);
@@ -483,6 +506,8 @@ pub fn run() {
             elapsed_secs: Arc::new(Mutex::new(0.0)),
             audio_duration_secs: Arc::new(Mutex::new(0.0)),
             active_model,
+            dictionary_config,
+            hotwords_file_path,
         })
         .invoke_handler(tauri::generate_handler![
             // 转录命令 (旧)
@@ -520,6 +545,11 @@ pub fn run() {
             commands::history::save_history,
             commands::history::delete_history,
             commands::history::clear_history,
+            // 词典命令
+            commands::dictionary::get_dictionary_config,
+            commands::dictionary::save_hotwords,
+            commands::dictionary::save_replacements,
+            commands::dictionary::get_hotwords_file_path,
         ])
         .on_page_load(|webview, payload| {
             if webview.label() == "main" && matches!(payload.event(), PageLoadEvent::Finished) {
