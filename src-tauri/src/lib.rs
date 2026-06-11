@@ -12,6 +12,7 @@ use engine::recognizer_factory::RecognizerFactory;
 use engine::transcriber::Transcriber;
 use engine::transcription_pipeline::{SegmentResult, VadSettings};
 use sherpa_onnx::OfflineRecognizer;
+use std::io::Write;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
@@ -80,6 +81,25 @@ fn build_models(
     let model_dir = Path::new(model_path).join(model_type.dir_name());
     let model_dir_str = model_dir.to_string_lossy().to_string();
 
+    // Auto-fix: if Paraformer tokens.txt is in JSON format, convert it
+    if matches!(model_type, engine::recognizer_factory::ModelType::Paraformer) {
+        let tokens_path = model_dir.join("tokens.txt");
+        if tokens_path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&tokens_path) {
+                if content.trim_start().starts_with('[') {
+                    log::warn!("[build_models] Paraformer tokens.txt is in JSON format, converting...");
+                    if let Ok(tokens) = serde_json::from_str::<Vec<String>>(&content) {
+                        let mut file = std::fs::File::create(&tokens_path).unwrap();
+                        for (i, token) in tokens.iter().enumerate() {
+                            let _ = writeln!(file, "{} {}", token, i);
+                        }
+                        log::info!("[build_models] tokens.txt converted with {} tokens", tokens.len());
+                    }
+                }
+            }
+        }
+    }
+
     // Adjust VAD settings based on model type
     let effective_settings = match model_type {
         engine::recognizer_factory::ModelType::Paraformer => {
@@ -108,9 +128,93 @@ fn build_models(
         effective_settings.num_threads
     );
 
-    let recognizer = engine::recognizer_factory::RecognizerFactory::create(&model_type, &config)
-        .map_err(|e| e.to_string())?;
-    log::info!("[build_models] recognizer created");
+    let (recognizer, actual_dir_name) = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        engine::recognizer_factory::RecognizerFactory::create(&model_type, &config)
+    })) {
+        Ok(Ok(r)) => {
+            let name = if config.model_dir.contains("paraformer") { "paraformer" } else { "sense-voice-small" };
+            (r, name.to_string())
+        }
+        Ok(Err(e)) => {
+            log::error!("[build_models] failed to create {} recognizer: {e}", model_type.display_name());
+            // Try to fall back to another available model
+            let fallback_type = match model_type {
+                engine::recognizer_factory::ModelType::Paraformer
+                    if available.contains(&"sense-voice-small".to_string()) => {
+                    log::warn!("[build_models] falling back to SenseVoice-Small");
+                    Some(engine::recognizer_factory::ModelType::SenseVoice)
+                }
+                engine::recognizer_factory::ModelType::SenseVoice
+                    if available.contains(&"paraformer".to_string()) => {
+                    log::warn!("[build_models] falling back to Paraformer");
+                    Some(engine::recognizer_factory::ModelType::Paraformer)
+                }
+                _ => None,
+            };
+            match fallback_type {
+                Some(ft) => {
+                    let fb_dir = Path::new(model_path).join(ft.dir_name());
+                    let fb_config = engine::recognizer_factory::RecognizerConfig {
+                        model_dir: fb_dir.to_string_lossy().to_string(),
+                        num_threads: settings.num_threads as u32,
+                        hotwords_file: None,
+                        hotwords_score: 1.5,
+                        use_itn: true,
+                    };
+                    let fb_name = ft.dir_name().to_string();
+                    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        engine::recognizer_factory::RecognizerFactory::create(&ft, &fb_config)
+                    })) {
+                        Ok(Ok(r)) => (r, fb_name),
+                        Ok(Err(fe)) => return Err(format!("Fallback also failed: {fe}")),
+                        Err(_) => return Err(format!("Fallback model panicked during creation")),
+                    }
+                }
+                None => return Err(format!("Failed to create {} recognizer: {e}", model_type.display_name())),
+            }
+        }
+        Err(panic_info) => {
+            log::error!("[build_models] {} recognizer creation panicked: {:?}", model_type.display_name(), panic_info);
+            // Try to fall back to another available model
+            let fallback_type = match model_type {
+                engine::recognizer_factory::ModelType::Paraformer
+                    if available.contains(&"sense-voice-small".to_string()) => {
+                    Some(engine::recognizer_factory::ModelType::SenseVoice)
+                }
+                engine::recognizer_factory::ModelType::SenseVoice
+                    if available.contains(&"paraformer".to_string()) => {
+                    Some(engine::recognizer_factory::ModelType::Paraformer)
+                }
+                _ => None,
+            };
+            match fallback_type {
+                Some(ft) => {
+                    let fb_dir = Path::new(model_path).join(ft.dir_name());
+                    let fb_config = engine::recognizer_factory::RecognizerConfig {
+                        model_dir: fb_dir.to_string_lossy().to_string(),
+                        num_threads: settings.num_threads as u32,
+                        hotwords_file: None,
+                        hotwords_score: 1.5,
+                        use_itn: true,
+                    };
+                    let fb_name = ft.dir_name().to_string();
+                    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        engine::recognizer_factory::RecognizerFactory::create(&ft, &fb_config)
+                    })) {
+                        Ok(Ok(r)) => {
+                            log::warn!("[build_models] recovered from panic, using fallback model {}", fb_name);
+                            (r, fb_name)
+                        }
+                        Ok(Err(fe)) => return Err(format!("Fallback after panic also failed: {fe}")),
+                        Err(_) => return Err("Fallback model also panicked".into()),
+                    }
+                }
+                None => return Err(format!("{} model creation panicked and no fallback available", model_type.display_name())),
+            }
+        }
+    };
+
+    log::info!("[build_models] recognizer created, actual_model={actual_dir_name}");
 
     // Create Silero VAD
     let vad_model_path = Path::new(model_path)
@@ -126,7 +230,7 @@ fn build_models(
     let vad = create_silero_vad_with_settings(&vad_model_str, &effective_settings)?;
     log::info!("[build_models] VAD created");
 
-    Ok((recognizer, vad, effective_settings.num_threads as u32, model_type.dir_name().to_string()))
+    Ok((recognizer, vad, effective_settings.num_threads as u32, actual_dir_name.to_string()))
 }
 
 /// Create Silero VAD with custom settings.
@@ -185,7 +289,32 @@ fn external_navigation_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Read initial config to get model path for background init
-    let initial_config = AppConfig::default();
+    let mut initial_config = AppConfig::load();
+
+    // Crash recovery: if a `.loading` marker file exists, the previous model load crashed the app.
+    // Fall back to the other available model.
+    let crash_marker_path = std::path::PathBuf::from(&initial_config.model_path).join(".model_loading");
+    if crash_marker_path.exists() {
+        if let Ok(crashed_model) = std::fs::read_to_string(&crash_marker_path) {
+            log::warn!("[init] crash detected: model '{}' caused crash on last load, falling back", crashed_model);
+            let fallback = if crashed_model == "paraformer" { "sense-voice-small" } else { "paraformer" };
+            // Check if fallback model is available
+            let fallback_dir = std::path::Path::new(&initial_config.model_path).join(fallback);
+            let fallback_available = if fallback == "paraformer" {
+                engine::model_manager::is_paraformer_installed_at(&fallback_dir)
+            } else {
+                engine::model_manager::is_model_installed_at(&fallback_dir)
+            };
+            if fallback_available {
+                initial_config.active_model = fallback.to_string();
+                let _ = AppConfig::save(&initial_config);
+                log::info!("[init] switched to fallback model: {fallback}");
+            } else {
+                log::warn!("[init] fallback model {fallback} not available, will try original model anyway");
+            }
+        }
+        let _ = std::fs::remove_file(&crash_marker_path);
+    }
 
     // Build streaming state
     let recognizer = Arc::new(Mutex::new(None::<OfflineRecognizer>));
@@ -204,6 +333,7 @@ pub fn run() {
     let init_num_threads = Arc::clone(&num_threads);
     let init_vad_settings = Arc::clone(&vad_settings);
     let init_model_path = initial_config.model_path.clone();
+    let init_active_model_arc = Arc::clone(&active_model);
     let init_active_model = initial_config.active_model.clone();
 
     // Background thread: load models
@@ -211,8 +341,19 @@ pub fn run() {
         log::info!("[init] starting model initialization...");
         let settings = init_vad_settings.lock().unwrap().clone();
         let preferred = if init_active_model.is_empty() { None } else { Some(init_active_model.as_str()) };
+
+        // Write crash marker before loading model
+        let marker_path = std::path::Path::new(&init_model_path).join(".model_loading");
+        if let Some(parent) = marker_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(&marker_path, &init_active_model);
+
         match build_models(&init_model_path, &settings, preferred) {
             Ok((rec, vad, threads, model_name)) => {
+                // Model loaded successfully — remove crash marker
+                let _ = std::fs::remove_file(&marker_path);
+
                 log::info!("[init] models ready, num_threads={threads}, active_model={model_name}");
                 let r_ok = init_recognizer.lock().map(|mut r| {
                     *r = Some(rec);
@@ -222,6 +363,17 @@ pub fn run() {
                 }).is_ok();
                 if r_ok && v_ok {
                     init_num_threads.store(threads, Ordering::Relaxed);
+                    // Update active_model if it differs from config (e.g., fallback occurred)
+                    if let Ok(mut a) = init_active_model_arc.lock() {
+                        *a = model_name.clone();
+                    }
+                    // Persist the actual model to config file
+                    let mut cfg = AppConfig::load();
+                    if cfg.active_model != model_name {
+                        log::info!("[init] updating active_model from {} to {}", cfg.active_model, model_name);
+                        cfg.active_model = model_name;
+                        let _ = AppConfig::save(&cfg);
+                    }
                     init_status_clone.store(1, Ordering::Relaxed); // 1 = ready
                 } else {
                     log::error!("[init] mutex poisoned, marking as error");
@@ -232,6 +384,9 @@ pub fn run() {
                 }
             }
             Err(e) => {
+                // Model load failed (caught by catch_unwind) — remove crash marker
+                let _ = std::fs::remove_file(&marker_path);
+
                 log::error!("[init] model initialization failed: {e}");
                 if let Ok(mut err) = init_error_clone.lock() {
                     *err = e;

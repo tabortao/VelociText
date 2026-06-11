@@ -6,6 +6,10 @@ Paraformer-large长音频模型集成VAD、ASR、标点与时间戳功能，可�
 - 热词版本：Paraformer-large热词版模型支持热词定制功能，基于提供的热词列表进行激励增强，提升热词的召回率和准确率。
 - https://k2-fsa.github.io/sherpa/onnx/paraformer/index.html#streaming-paraformer
 - https://www.modelscope.cn/models/iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-onnx/files
+- https://k2-fsa.github.io/sherpa/onnx/pretrained_models/offline-paraformer/paraformer-models.html#csukuangfj-sherpa-onnx-paraformer-trilingual-zh-cantonese-en-chinese-english-cantonese
+- https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-paraformer-zh-2024-03-09.tar.bz2
+- https://www.modelscope.cn/models/QuadraV/speech_paraformer-large_asr_nat-zh-cantonese-en-16k-vocab8501-online-onnx/files  推荐下载地址
+
 
 ## SenseVoice-Small
 

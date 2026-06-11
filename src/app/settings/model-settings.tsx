@@ -103,13 +103,13 @@ export function ModelSettingsPage() {
     setSwitching(true)
     try {
       const { invoke } = await import("@tauri-apps/api/core")
+      // This saves config and restarts the app
       await invoke<string>("set_active_model", { modelName })
-      await loadActiveModel()
     } catch (err) {
       console.error("Failed to switch model:", err)
-    } finally {
       setSwitching(false)
     }
+    // No finally: app will restart, switching stays true
   }
 
   const modelDescriptions: Record<string, string> = {
@@ -167,7 +167,8 @@ export function ModelSettingsPage() {
             const isDownloading = downloading === model.name
 
             return (
-              <div key={model.name} className={`flex items-center justify-between p-4 border rounded-lg ${isActive ? "border-primary/50 bg-primary/5" : ""}`}>
+              <div key={model.name} className={`p-4 border rounded-lg ${isActive ? "border-primary/50 bg-primary/5" : ""}`}>
+                <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className={`p-2 rounded-full ${isActive ? "bg-primary/20" : isInstalled ? "bg-green-100 dark:bg-green-900" : "bg-muted"}`}>
                     {isActive ? (
@@ -217,6 +218,21 @@ export function ModelSettingsPage() {
                     </Button>
                   )}
                 </div>
+                </div>
+                {model.name === "paraformer" && !isInstalled && (
+                  <div className="mt-2 text-xs text-muted-foreground border-t pt-2">
+                    <a
+                      href="https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-paraformer-trilingual-zh-cantonese-en.tar.bz2"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline hover:text-foreground"
+                    >
+                      {t("models.manualDownload")}
+                    </a>
+                    <span className="mx-1">·</span>
+                    <span>{t("models.manualHint")}</span>
+                  </div>
+                )}
               </div>
             )
           })}

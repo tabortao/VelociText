@@ -53,6 +53,10 @@ tokio = { version = "1", features = ["full"] }
 # 文件处理
 tempfile = "3"
 
+# 解压 tar.bz2 模型包
+bzip2 = "0.4"
+tar = "0.4"
+
 # 错误处理
 anyhow = "1"
 thiserror = "2"

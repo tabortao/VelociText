@@ -37,12 +37,13 @@ pub async fn get_active_model(
     Ok(active.clone())
 }
 
-/// 切换活跃 ASR 模型（需要重建 recognizer）
+/// 切换活跃 ASR 模型（保存配置后重启应用）
 #[tauri::command]
 pub async fn set_active_model(
     model_name: String,
+    app_handle: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
-) -> Result<String, String> {
+) -> Result<(), String> {
     // Validate model name
     if model_name != "sense-voice-small" && model_name != "paraformer" {
         return Err(format!("Unknown model: {model_name}"));
@@ -65,38 +66,17 @@ pub async fn set_active_model(
         return Err(format!("Model {model_name} is not installed"));
     }
 
-    // Rebuild models with the preferred model
-    let settings = state.vad_settings.lock().map_err(|e| e.to_string())?.clone();
-    let (recognizer, vad, threads, active) = {
-        let result = crate::build_models(&model_path, &settings, Some(&model_name));
-        match result {
-            Ok(r) => r,
-            Err(e) => return Err(format!("Failed to switch model: {e}")),
-        }
-    };
-
-    // Update state
-    {
-        let mut r = state.recognizer.lock().map_err(|e| e.to_string())?;
-        *r = Some(recognizer);
-    }
-    {
-        let mut v = state.vad_detector.lock().map_err(|e| e.to_string())?;
-        *v = Some(vad);
-    }
-    state.num_threads.store(threads, std::sync::atomic::Ordering::Relaxed);
-    {
-        let mut a = state.active_model.lock().map_err(|e| e.to_string())?;
-        *a = active.clone();
-    }
-
-    // Persist to config
+    // Save to config file
     {
         let mut config = state.config.lock().map_err(|e| e.to_string())?;
-        config.active_model = active.clone();
+        config.active_model = model_name.clone();
+        crate::config::app_config::AppConfig::save(&config).map_err(|e| e.to_string())?;
     }
 
-    Ok(active)
+    log::info!("[set_active_model] config saved, active_model={model_name}, restarting app...");
+
+    // Restart the application (never returns)
+    app_handle.restart();
 }
 
 /// 下载模型
@@ -183,7 +163,19 @@ pub async fn download_specific_model(
             }
             "paraformer" => {
                 let dir = Path::new(&model_path).join("paraformer");
-                if is_paraformer_installed_at(&dir) {
+                // Check if properly installed (not just files existing, but correct format)
+                let needs_download = if is_paraformer_installed_at(&dir) {
+                    // Verify tokens.txt is not in JSON format
+                    let tokens_path = dir.join("tokens.txt");
+                    if let Ok(content) = std::fs::read_to_string(&tokens_path) {
+                        content.trim_start().starts_with('[') // JSON format = broken, needs re-download
+                    } else {
+                        true
+                    }
+                } else {
+                    true
+                };
+                if !needs_download {
                     return Ok("Model already installed".into());
                 }
                 manager.download_paraformer_large(&|progress| {

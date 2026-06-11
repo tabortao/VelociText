@@ -39,6 +39,49 @@ impl Default for AppConfig {
     }
 }
 
+impl AppConfig {
+    /// Returns the path to the config file.
+    fn config_file_path() -> PathBuf {
+        app_data_dir().join("config.json")
+    }
+
+    /// Load config from disk. Returns default if file doesn't exist or is invalid.
+    pub fn load() -> Self {
+        let path = Self::config_file_path();
+        if path.exists() {
+            match std::fs::read_to_string(&path) {
+                Ok(content) => {
+                    match serde_json::from_str(&content) {
+                        Ok(config) => {
+                            log::info!("[AppConfig] loaded from {}", path.display());
+                            return config;
+                        }
+                        Err(e) => {
+                            log::warn!("[AppConfig] failed to parse config: {e}, using defaults");
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::warn!("[AppConfig] failed to read config: {e}, using defaults");
+                }
+            }
+        }
+        Self::default()
+    }
+
+    /// Save config to disk.
+    pub fn save(&self) -> Result<(), String> {
+        let path = Self::config_file_path();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create config dir: {e}"))?;
+        }
+        let content = serde_json::to_string_pretty(self).map_err(|e| format!("Failed to serialize config: {e}"))?;
+        std::fs::write(&path, content).map_err(|e| format!("Failed to write config: {e}"))?;
+        log::info!("[AppConfig] saved to {}", path.display());
+        Ok(())
+    }
+}
+
 fn app_data_dir() -> PathBuf {
     #[cfg(target_os = "windows")]
     {

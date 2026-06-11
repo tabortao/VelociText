@@ -4898,6 +4898,7 @@ name = "velocitext"
 version = "0.1.1"
 dependencies = [
  "anyhow",
+ "bzip2",
  "chrono",
  "log",
  "serde",
@@ -4905,6 +4906,7 @@ dependencies = [
  "sevenz-rust",
  "sherpa-onnx",
  "symphonia",
+ "tar",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",

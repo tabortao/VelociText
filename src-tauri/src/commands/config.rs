@@ -23,7 +23,9 @@ pub async fn set_app_config(
 ) -> Result<(), String> {
     let mut config = state.config.lock().map_err(|e| e.to_string())?;
     *config = new_config;
-    log::info!("app config updated");
+    // Persist to disk
+    config.save().map_err(|e| e.to_string())?;
+    log::info!("app config updated and saved");
     Ok(())
 }
 

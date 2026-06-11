@@ -5,6 +5,49 @@ use serde::{Deserialize, Serialize};
 use std::io::Read;
 use std::path::Path;
 
+/// Download a file from URL to destination, reporting progress.
+fn download_file(url: &str, dest: &Path, model_name: &str, on_progress: &dyn Fn(DownloadProgress)) -> AppResult<()> {
+    let resp = ureq::get(url)
+        .call()
+        .map_err(|e| AppError::ModelDownload(format!("HTTP request failed: {}", e)))?;
+
+    let total = resp
+        .header("Content-Length")
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0);
+
+    let mut reader = resp.into_reader();
+    let mut buf = [0u8; 8192];
+    let mut downloaded: u64 = 0;
+    let mut file = std::fs::File::create(dest)
+        .map_err(|e| AppError::ModelDownload(format!("Create file failed: {}", e)))?;
+
+    loop {
+        let n = reader
+            .read(&mut buf)
+            .map_err(|e| AppError::ModelDownload(format!("Download interrupted: {}", e)))?;
+        if n == 0 {
+            break;
+        }
+        std::io::Write::write_all(&mut file, &buf[..n])
+            .map_err(|e| AppError::ModelDownload(format!("Write file failed: {}", e)))?;
+        downloaded += n as u64;
+
+        if total > 0 {
+            let percentage = (downloaded as f64 / total as f64) * 100.0;
+            on_progress(DownloadProgress {
+                model_name: model_name.into(),
+                downloaded,
+                total,
+                percentage,
+                stage: format!("Downloading..."),
+            });
+        }
+    }
+
+    Ok(())
+}
+
 /// 模型信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -90,8 +133,8 @@ impl ModelManager {
             },
             ModelInfo {
                 name: "paraformer".into(),
-                display_name: "Paraformer-Large".into(),
-                size: "~238MB (int8)".into(),
+                display_name: "Paraformer (Trilingual)".into(),
+                size: "~170MB (int8)".into(),
                 installed: paraformer_installed,
                 path: if paraformer_installed {
                     Some(paraformer_path.to_string_lossy().to_string())
@@ -296,11 +339,19 @@ impl ModelManager {
         Ok(model_dir.to_string_lossy().to_string())
     }
 
-    /// Download Paraformer-Large ASR model from ModelScope.
+    /// Download Paraformer Trilingual ASR model (sherpa-onnx official).
     ///
-    /// Downloads from `iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-onnx`.
-    /// The ModelScope model uses `model_quant.onnx` and `tokens.json`, which are
-    /// renamed to `model.int8.onnx` and `tokens.txt` respectively for sherpa-onnx compatibility.
+    /// Downloads `sherpa-onnx-paraformer-trilingual-zh-cantonese-en` from GitHub releases
+    /// as a tar.bz2 archive and extracts `model.int8.onnx` and `tokens.txt` to the local
+    /// model directory.
+    ///
+    /// Users can also manually place model files in the `paraformer/` directory:
+    /// - `model.int8.onnx` (or `model.onnx`) — the ONNX model
+    /// - `tokens.txt` — vocabulary file
+    ///
+    /// Manual download from ModelScope (faster in China):
+    ///   https://www.modelscope.cn/models/QuadraV/speech_paraformer-large_asr_nat-zh-cantonese-en-16k-vocab8501-online-onnx/files
+    /// Download the tar.bz2, extract, and copy model.int8.onnx + tokens.txt to the paraformer/ folder.
     pub fn download_paraformer_large(
         &self,
         on_progress: &dyn Fn(DownloadProgress),
@@ -308,65 +359,106 @@ impl ModelManager {
         let model_dir = Path::new(&self.models_dir).join("paraformer");
         std::fs::create_dir_all(&model_dir)?;
 
-        let base_url = "https://www.modelscope.cn/models/iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-onnx/resolve/master";
+        // Check if already installed with correct files
+        if is_paraformer_installed_at(&model_dir) {
+            // Verify tokens.txt is not in JSON format (legacy broken download)
+            let tokens_path = model_dir.join("tokens.txt");
+            if let Ok(content) = std::fs::read_to_string(&tokens_path) {
+                if !content.trim_start().starts_with('[') {
+                    // Check model file size is reasonable (int8 model is ~170MB)
+                    let model_int8 = model_dir.join("model.int8.onnx");
+                    let model_plain = model_dir.join("model.onnx");
+                    let model_file = if model_int8.exists() { &model_int8 } else { &model_plain };
+                    if model_file.exists() {
+                        let model_size_ok = std::fs::metadata(model_file)
+                            .map(|m| m.len() > 50_000_000) // at least 50MB
+                            .unwrap_or(false);
 
-        // ModelScope file name → local file name (rename for sherpa-onnx compatibility)
-        let files: &[(&str, &str, u64)] = &[
-            ("model_quant.onnx", "model.int8.onnx", 238), // ~238 MB
-            ("tokens.json", "tokens.txt", 1),             // ~94 KB
-        ];
-
-        for (remote_name, local_name, size_mb) in files {
-            let url = format!("{}/{}", base_url, remote_name);
-            let dest = model_dir.join(local_name);
-
-            // Skip if already exists and correct size
-            if dest.exists() {
-                let existing = std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(0);
-                if *size_mb > 0 && existing > size_mb * 1024 * 1024 / 2 {
-                    continue;
+                        if model_size_ok {
+                            on_progress(DownloadProgress {
+                                model_name: "paraformer".into(),
+                                downloaded: 100,
+                                total: 100,
+                                percentage: 100.0,
+                                stage: "completed".into(),
+                            });
+                            return Ok(model_dir.to_string_lossy().to_string());
+                        }
+                    }
                 }
             }
+            // Old/broken model files exist — clean them up before re-downloading
+            log::warn!("[download_paraformer] cleaning up old/broken model files in {:?}", model_dir);
+            let _ = std::fs::remove_dir_all(&model_dir);
+            std::fs::create_dir_all(&model_dir)?;
+        }
 
-            // Download
-            let resp = ureq::get(&url)
-                .call()
-                .map_err(|e| AppError::ModelDownload(format!("HTTP request failed: {}", e)))?;
+        // Download tar.bz2 from GitHub releases (sherpa-onnx official)
+        let archive_name = "sherpa-onnx-paraformer-trilingual-zh-cantonese-en";
+        let archive_url = format!(
+            "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/{}.tar.bz2",
+            archive_name
+        );
 
-            let total = resp
-                .header("Content-Length")
-                .and_then(|v| v.parse::<u64>().ok())
-                .unwrap_or(0);
+        on_progress(DownloadProgress {
+            model_name: "paraformer".into(),
+            downloaded: 0,
+            total: 0,
+            percentage: 0.0,
+            stage: "Downloading model archive...".into(),
+        });
 
-            let mut reader = resp.into_reader();
-            let mut buf = [0u8; 8192];
-            let mut downloaded: u64 = 0;
-            let mut file = std::fs::File::create(&dest)
-                .map_err(|e| AppError::ModelDownload(format!("Create file failed: {}", e)))?;
+        // Download to temp file
+        let temp_dir = std::env::temp_dir();
+        let archive_path = temp_dir.join(format!("{}.tar.bz2", archive_name));
 
-            loop {
-                let n = reader
-                    .read(&mut buf)
-                    .map_err(|e| AppError::ModelDownload(format!("Download interrupted: {}", e)))?;
-                if n == 0 {
-                    break;
+        download_file(&archive_url, &archive_path, "paraformer", on_progress)?;
+
+        on_progress(DownloadProgress {
+            model_name: "paraformer".into(),
+            downloaded: 100,
+            total: 100,
+            percentage: 90.0,
+            stage: "Extracting...".into(),
+        });
+
+        // Extract tar.bz2
+        let file = std::fs::File::open(&archive_path)
+            .map_err(|e| AppError::ModelDownload(format!("Open archive failed: {}", e)))?;
+        let bz2 = bzip2::read::BzDecoder::new(file);
+        let mut archive = tar::Archive::new(bz2);
+
+        let entries: Vec<tar::Entry<_>> = archive.entries()
+            .map_err(|e| AppError::ModelDownload(format!("Read archive failed: {}", e)))?
+            .filter_map(|e| e.ok())
+            .collect();
+
+        for mut entry in entries {
+            let relative = {
+                let path = entry.path().map_err(|e| AppError::ModelDownload(format!("Invalid path: {}", e)))?;
+                let path_str = path.to_string_lossy();
+                if path_str.starts_with(&format!("{}/", archive_name)) {
+                    Some(path_str[archive_name.len() + 1..].to_string())
+                } else {
+                    None
                 }
-                std::io::Write::write_all(&mut file, &buf[..n])
-                    .map_err(|e| AppError::ModelDownload(format!("Write file failed: {}", e)))?;
-                downloaded += n as u64;
+            };
 
-                if total > 0 {
-                    let percentage = (downloaded as f64 / total as f64) * 100.0;
-                    on_progress(DownloadProgress {
-                        model_name: "paraformer".into(),
-                        downloaded,
-                        total,
-                        percentage,
-                        stage: format!("Downloading {}...", remote_name),
-                    });
+            if let Some(relative) = relative {
+                if relative == "model.int8.onnx" || relative == "tokens.txt" {
+                    let dest = model_dir.join(&relative);
+                    let mut file_content = Vec::new();
+                    entry.read_to_end(&mut file_content)
+                        .map_err(|e| AppError::ModelDownload(format!("Read entry failed: {}", e)))?;
+                    std::fs::write(&dest, &file_content)
+                        .map_err(|e| AppError::ModelDownload(format!("Write file failed: {}", e)))?;
+                    log::info!("[download_paraformer] extracted {}", relative);
                 }
             }
         }
+
+        // Clean up archive
+        let _ = std::fs::remove_file(&archive_path);
 
         if !is_paraformer_installed_at(&model_dir) {
             return Err(AppError::ModelDownload(

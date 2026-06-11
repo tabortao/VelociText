@@ -49,8 +49,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Toast notification on transcription completion showing audio duration and elapsed time (4s auto-dismiss)
 - `transcribe.completedToast` i18n key for completion toast message (Chinese and English)
-- **Paraformer-Large ASR model support**: download from ModelScope (`iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-onnx`), higher accuracy Chinese speech recognition
+- **Paraformer-Large ASR model support**: download from GitHub releases (`sherpa-onnx-paraformer-zh-2023-03-28.tar.bz2`), higher accuracy Chinese speech recognition
 - **Model switching UI**: switch between SenseVoice-Small and Paraformer-Large in model management; active model highlighted with "Active" badge
+- **Config persistence**: `AppConfig` now saves to/loads from `{app_data_dir}/config.json`, preserving `activeModel` and other settings across restarts
+- **Model switching via restart**: `set_active_model` now saves config to JSON and calls `app_handle.restart()` instead of hot-swapping models (which caused crashes). On startup, `AppConfig::load()` reads the config and `build_models` uses the `activeModel` field to load the correct model
+- **Paraformer tokens.txt auto-fix**: ModelScope provides `tokens.json` (JSON array format), but sherpa-onnx requires `tokens.txt` (plain text, one token per line). Download now converts JSON to correct format. Additionally, `build_models` auto-detects and fixes incorrectly formatted `tokens.txt` on startup
+- **Model load fallback**: if the preferred model fails to load, `build_models` automatically falls back to another available model instead of crashing
 - **Per-model download**: individual download buttons for each model (SenseVoice-Small, Paraformer-Large, Silero VAD)
 - `download_specific_model`, `get_active_model`, `set_active_model` Tauri commands for model management
 - `activeModel` field in `AppConfig` for persisting the selected ASR model across restarts
@@ -68,6 +72,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed `build_models` dir_name mismatch: was checking `"paraformer-large"` but `ModelType::Paraformer.dir_name()` returns `"paraformer"`
 
 ### Fixed
+- **Paraformer model crash on load**: switched download source from ModelScope iic (FunASR native ONNX, incompatible with sherpa-onnx) to official sherpa-onnx GitHub releases (`sherpa-onnx-paraformer-trilingual-zh-cantonese-en.tar.bz2`). FunASR native ONNX models lack the metadata and input/output names that sherpa-onnx expects, causing ONNX Runtime to abort the process
+- **Model upgraded to Trilingual Paraformer** (`csukuangfj/sherpa-onnx-paraformer-trilingual-zh-cantonese-en`): supports Chinese, English, and Cantonese (粤语). Downloaded from GitHub releases; users can also manually download from ModelScope (`QuadraV/speech_paraformer-large_asr_nat-zh-cantonese-en-16k-vocab8501-online-onnx`) for faster speed in China, then extract and copy `model.int8.onnx` + `tokens.txt` to the `paraformer/` directory
+- **Crash recovery mechanism**: added `.model_loading` marker file — if the app crashes during model initialization, the next startup detects the marker and automatically falls back to the other available model
+- **Old Paraformer model cleanup**: when re-downloading Paraformer, old/broken model files (e.g., `model_quant.onnx` from ModelScope, JSON-format `tokens.txt`) are now automatically cleaned up before downloading the correct sherpa-onnx model
+- **`download_specific_model` Paraformer check**: now verifies `tokens.txt` format (not just file existence) before skipping download, ensuring broken models get re-downloaded
+- **Tar entry borrow checker error (E0505)**: fixed by extracting path string into a separate scope before moving the entry for content reading
+- **`config_arc` undefined variable**: replaced with direct `Mutex::new(initial_config)` since config fields are cloned before the init thread
+- **`set_active_model` return type**: changed from `Result<String, String>` to `Result<(), String>` since `app_handle.restart()` never returns
 - Updated About page tech stack description: replaced "FFmpeg for audio/video decoding" with "symphonia for pure Rust audio/video decoding"
 - **Video file transcription**: fixed symphonia selecting video codec track instead of audio track in video files. Restricted symphonia to audio-only features (mp3, aac, flac, vorbis, wav, ogg, isomp4, mkv, pcm, adpcm, aiff, caf) matching the official sherpa-onnx Tauri example. Removed overly strict `sample_rate`/`channels` presence check that incorrectly skipped audio tracks in MP4/MKV containers where these fields are not populated during probe phase.
 - **Video file audio sample rate detection**: fixed incorrect sample rate and channel count for video files. MP4/MKV containers often do not report `sample_rate` and `channels` in `codec_params` during the probe phase, causing the pipeline to default to 16000 Hz / 1 channel. This meant the resampler was never created for 44100/48000 Hz audio, resulting in garbled or empty ASR output. Now the actual sample rate and channel count are determined from the first decoded `AudioBufferRef` frame, and the resampler is created lazily with the correct rate.
