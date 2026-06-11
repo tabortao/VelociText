@@ -741,6 +741,7 @@ pub fn apply_vad_settings(
     let init_status = Arc::clone(&state.init_status);
     let init_error = Arc::clone(&state.init_error);
     let init_num_threads = Arc::clone(&state.num_threads);
+    let active_model_arc = Arc::clone(&state.active_model);
     let model_path = {
         let config = state.config.lock().map_err(|e| e.to_string())?;
         config.model_path.clone()
@@ -748,9 +749,11 @@ pub fn apply_vad_settings(
 
     std::thread::spawn(move || {
         log::info!("[apply_settings] rebuilding models with new settings...");
-        match crate::build_models(&model_path, &new_settings) {
-            Ok((rec, vad, threads)) => {
-                log::info!("[apply_settings] models rebuilt, num_threads={threads}");
+        let active = active_model_arc.lock().map(|a| a.clone()).unwrap_or_default();
+        let preferred = if active.is_empty() { None } else { Some(active.as_str()) };
+        match crate::build_models(&model_path, &new_settings, preferred) {
+            Ok((rec, vad, threads, model_name)) => {
+                log::info!("[apply_settings] models rebuilt, num_threads={threads}, active_model={model_name}");
                 let r_ok = recognizer_arc.lock().map(|mut r| { *r = Some(rec); }).is_ok();
                 let v_ok = vad_arc.lock().map(|mut v| { *v = Some(vad); }).is_ok();
                 if r_ok && v_ok {

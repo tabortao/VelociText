@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
-import { CpuIcon, DownloadIcon, CheckCircleIcon, FolderOpenIcon } from "lucide-react"
+import { CpuIcon, DownloadIcon, CheckCircleIcon, FolderOpenIcon, ZapIcon } from "lucide-react"
 import { useAppContext } from "@/lib/app-context"
 import type { AppConfig, ModelInfo, DownloadProgress } from "@/types"
 
@@ -11,9 +11,11 @@ export function ModelSettingsPage() {
   const { t } = useAppContext()
   const [config, setConfig] = useState<AppConfig | null>(null)
   const [models, setModels] = useState<ModelInfo[]>([])
-  const [downloading, setDownloading] = useState(false)
+  const [downloading, setDownloading] = useState<string | null>(null)
   const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null)
   const [downloadError, setDownloadError] = useState<string | null>(null)
+  const [activeModel, setActiveModel] = useState<string>("")
+  const [switching, setSwitching] = useState(false)
 
   const loadConfig = async () => {
     try {
@@ -35,9 +37,20 @@ export function ModelSettingsPage() {
     }
   }
 
+  const loadActiveModel = async () => {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core")
+      const active = await invoke<string>("get_active_model")
+      setActiveModel(active)
+    } catch {
+      // ignore
+    }
+  }
+
   useEffect(() => {
     loadConfig()
     loadModels()
+    loadActiveModel()
 
     let unlisten: (() => void) | undefined
     const setupListener = async () => {
@@ -46,8 +59,9 @@ export function ModelSettingsPage() {
         unlisten = await listen<DownloadProgress>("model-download-progress", (event) => {
           setDownloadProgress(event.payload)
           if (event.payload.stage === "completed") {
-            setDownloading(false)
+            setDownloading(null)
             loadModels()
+            loadActiveModel()
           }
         })
       } catch (err) {
@@ -72,25 +86,40 @@ export function ModelSettingsPage() {
     }
   }
 
-  const handleDownload = async () => {
-    setDownloading(true)
+  const handleDownload = async (modelName: string) => {
+    setDownloading(modelName)
     setDownloadError(null)
     setDownloadProgress(null)
     try {
       const { invoke } = await import("@tauri-apps/api/core")
-      await invoke<string>("download_model")
+      await invoke<string>("download_specific_model", { modelName })
     } catch (err) {
       setDownloadError(String(err))
-      setDownloading(false)
+      setDownloading(null)
     }
   }
 
-  const modelInstalled = models.some((m) => m.installed)
+  const handleSwitchModel = async (modelName: string) => {
+    setSwitching(true)
+    try {
+      const { invoke } = await import("@tauri-apps/api/core")
+      await invoke<string>("set_active_model", { modelName })
+      await loadActiveModel()
+    } catch (err) {
+      console.error("Failed to switch model:", err)
+    } finally {
+      setSwitching(false)
+    }
+  }
 
   const modelDescriptions: Record<string, string> = {
     "sense-voice-small": t("models.senseVoiceDesc"),
+    "paraformer": t("models.paraformerDesc"),
     "silero-vad": t("models.sileroVadDesc"),
   }
+
+  // ASR models that can be switched
+  const asrModels = ["sense-voice-small", "paraformer"]
 
   return (
     <div className="px-4 lg:px-6 space-y-4">
@@ -118,7 +147,7 @@ export function ModelSettingsPage() {
         </CardContent>
       </Card>
 
-      {/* Model download */}
+      {/* Model download & management */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -133,35 +162,61 @@ export function ModelSettingsPage() {
           {models.map((model) => {
             const isInstalled = model.installed
             const desc = modelDescriptions[model.name] || `~${model.size}`
+            const isActive = model.name === activeModel
+            const isAsrModel = asrModels.includes(model.name)
+            const isDownloading = downloading === model.name
+
             return (
-              <div key={model.name} className="flex items-center justify-between p-4 border rounded-lg">
+              <div key={model.name} className={`flex items-center justify-between p-4 border rounded-lg ${isActive ? "border-primary/50 bg-primary/5" : ""}`}>
                 <div className="flex items-center gap-3">
-                  <div className={`p-2 rounded-full ${isInstalled ? "bg-green-100 dark:bg-green-900" : "bg-muted"}`}>
-                    {isInstalled ? (
+                  <div className={`p-2 rounded-full ${isActive ? "bg-primary/20" : isInstalled ? "bg-green-100 dark:bg-green-900" : "bg-muted"}`}>
+                    {isActive ? (
+                      <ZapIcon className="size-5 text-primary" />
+                    ) : isInstalled ? (
                       <CheckCircleIcon className="size-5 text-green-600 dark:text-green-400" />
                     ) : (
                       <CpuIcon className="size-5 text-muted-foreground" />
                     )}
                   </div>
                   <div>
-                    <p className="font-medium">{model.displayName}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium">{model.displayName}</p>
+                      {isActive && (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">
+                          {t("models.activeModel")}
+                        </span>
+                      )}
+                    </div>
                     <p className="text-sm text-muted-foreground">{desc}</p>
                   </div>
                 </div>
-                {isInstalled ? (
-                  <span className="text-sm text-green-600 dark:text-green-400 font-medium">
-                    {t("models.installed")}
-                  </span>
-                ) : (
-                  <Button
-                    onClick={handleDownload}
-                    disabled={downloading}
-                    size="sm"
-                  >
-                    <DownloadIcon className="size-4 mr-1" />
-                    {downloading ? t("models.downloading") : t("models.download")}
-                  </Button>
-                )}
+                <div className="flex items-center gap-2">
+                  {isInstalled ? (
+                    isAsrModel && !isActive ? (
+                      <Button
+                        onClick={() => handleSwitchModel(model.name)}
+                        disabled={switching}
+                        variant="outline"
+                        size="sm"
+                      >
+                        {switching ? t("models.switching") : t("models.switchModel")}
+                      </Button>
+                    ) : (
+                      <span className="text-sm text-green-600 dark:text-green-400 font-medium">
+                        {t("models.installed")}
+                      </span>
+                    )
+                  ) : (
+                    <Button
+                      onClick={() => handleDownload(model.name)}
+                      disabled={downloading !== null}
+                      size="sm"
+                    >
+                      <DownloadIcon className="size-4 mr-1" />
+                      {isDownloading ? t("models.downloading") : t("models.download")}
+                    </Button>
+                  )}
+                </div>
               </div>
             )
           })}
@@ -194,7 +249,7 @@ export function ModelSettingsPage() {
           )}
 
           {/* Hint */}
-          {!modelInstalled && !downloading && (
+          {!models.some((m) => m.installed && asrModels.includes(m.name)) && !downloading && (
             <div className="text-sm text-muted-foreground py-2">
               {t("models.downloadHint")}
             </div>

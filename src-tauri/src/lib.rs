@@ -39,21 +39,37 @@ pub struct AppState {
     pub vad_settings: Arc<Mutex<VadSettings>>,
     pub elapsed_secs: Arc<Mutex<f32>>,
     pub audio_duration_secs: Arc<Mutex<f32>>,
+    pub active_model: Arc<Mutex<String>>, // "sense-voice-small" | "paraformer"
 }
 
 /// Build the ASR recognizer and Silero VAD from the configured model path.
-/// Returns (recognizer, vad, num_threads) on success.
+/// Returns (recognizer, vad, num_threads, model_dir_name) on success.
 fn build_models(
     model_path: &str,
     settings: &VadSettings,
-) -> Result<(OfflineRecognizer, sherpa_onnx::VoiceActivityDetector, u32), String> {
+    preferred_model: Option<&str>,
+) -> Result<(OfflineRecognizer, sherpa_onnx::VoiceActivityDetector, u32, String), String> {
     // Find available model
     let available = RecognizerFactory::list_available(model_path);
 
-    // Prefer SenseVoice-Small, fallback to Paraformer-Large
-    let model_type = if available.contains(&"sense-voice-small".to_string()) {
+    // Determine model type: use preferred if available, otherwise auto-detect
+    let model_type = if let Some(preferred) = preferred_model {
+        if available.contains(&preferred.to_string()) {
+            match preferred {
+                "sense-voice-small" => engine::recognizer_factory::ModelType::SenseVoice,
+                "paraformer" => engine::recognizer_factory::ModelType::Paraformer,
+                _ => {
+                    log::warn!("[build_models] unknown preferred model: {preferred}, auto-detecting");
+                    return build_models(model_path, settings, None);
+                }
+            }
+        } else {
+            log::warn!("[build_models] preferred model {preferred} not available, auto-detecting");
+            return build_models(model_path, settings, None);
+        }
+    } else if available.contains(&"sense-voice-small".to_string()) {
         engine::recognizer_factory::ModelType::SenseVoice
-    } else if available.contains(&"paraformer-large".to_string()) {
+    } else if available.contains(&"paraformer".to_string()) {
         engine::recognizer_factory::ModelType::Paraformer
     } else {
         return Err(format!(
@@ -64,9 +80,22 @@ fn build_models(
     let model_dir = Path::new(model_path).join(model_type.dir_name());
     let model_dir_str = model_dir.to_string_lossy().to_string();
 
+    // Adjust VAD settings based on model type
+    let effective_settings = match model_type {
+        engine::recognizer_factory::ModelType::Paraformer => {
+            // Paraformer handles longer utterances better
+            let mut s = settings.clone();
+            if s.max_speech_duration < 30.0 {
+                s.max_speech_duration = 30.0;
+            }
+            s
+        }
+        _ => settings.clone(),
+    };
+
     let config = engine::recognizer_factory::RecognizerConfig {
-        model_dir: model_dir_str,
-        num_threads: settings.num_threads as u32,
+        model_dir: model_dir_str.clone(),
+        num_threads: effective_settings.num_threads as u32,
         hotwords_file: None,
         hotwords_score: 1.5,
         use_itn: true,
@@ -76,7 +105,7 @@ fn build_models(
         "[build_models] model_type={}, model_dir={:?}, num_threads={}",
         model_type.display_name(),
         model_dir,
-        settings.num_threads
+        effective_settings.num_threads
     );
 
     let recognizer = engine::recognizer_factory::RecognizerFactory::create(&model_type, &config)
@@ -93,11 +122,11 @@ fn build_models(
         return Err(format!("VAD model not found at {vad_model_str}"));
     }
 
-    // Create VAD with custom settings
-    let vad = create_silero_vad_with_settings(&vad_model_str, settings)?;
+    // Create VAD with effective settings (may be adjusted for Paraformer)
+    let vad = create_silero_vad_with_settings(&vad_model_str, &effective_settings)?;
     log::info!("[build_models] VAD created");
 
-    Ok((recognizer, vad, settings.num_threads as u32))
+    Ok((recognizer, vad, effective_settings.num_threads as u32, model_type.dir_name().to_string()))
 }
 
 /// Create Silero VAD with custom settings.
@@ -165,6 +194,7 @@ pub fn run() {
     let init_error = Arc::new(Mutex::new(String::new()));
     let num_threads = Arc::new(AtomicU32::new(0));
     let vad_settings = Arc::new(Mutex::new(VadSettings::default()));
+    let active_model: Arc<Mutex<String>> = Arc::new(Mutex::new(initial_config.active_model.clone()));
 
     // Clone Arc handles for the init thread
     let init_recognizer = Arc::clone(&recognizer);
@@ -174,14 +204,16 @@ pub fn run() {
     let init_num_threads = Arc::clone(&num_threads);
     let init_vad_settings = Arc::clone(&vad_settings);
     let init_model_path = initial_config.model_path.clone();
+    let init_active_model = initial_config.active_model.clone();
 
     // Background thread: load models
     std::thread::spawn(move || {
         log::info!("[init] starting model initialization...");
         let settings = init_vad_settings.lock().unwrap().clone();
-        match build_models(&init_model_path, &settings) {
-            Ok((rec, vad, threads)) => {
-                log::info!("[init] models ready, num_threads={threads}");
+        let preferred = if init_active_model.is_empty() { None } else { Some(init_active_model.as_str()) };
+        match build_models(&init_model_path, &settings, preferred) {
+            Ok((rec, vad, threads, model_name)) => {
+                log::info!("[init] models ready, num_threads={threads}, active_model={model_name}");
                 let r_ok = init_recognizer.lock().map(|mut r| {
                     *r = Some(rec);
                 }).is_ok();
@@ -242,6 +274,7 @@ pub fn run() {
             vad_settings,
             elapsed_secs: Arc::new(Mutex::new(0.0)),
             audio_duration_secs: Arc::new(Mutex::new(0.0)),
+            active_model,
         })
         .invoke_handler(tauri::generate_handler![
             // 转录命令 (旧)
@@ -266,7 +299,9 @@ pub fn run() {
             commands::model::list_models,
             commands::model::get_model_path,
             commands::model::download_model,
-            // commands::model::download_paraformer_large, // not yet implemented
+            commands::model::download_specific_model,
+            commands::model::get_active_model,
+            commands::model::set_active_model,
             // 配置命令
             commands::config::get_app_config,
             commands::config::set_app_config,

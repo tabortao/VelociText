@@ -165,6 +165,7 @@ impl RecognizerFactory {
                 },
                 tokens: Some(tokens_path),
                 num_threads: config.num_threads as i32,
+                model_type: Some("paraformer".into()),
                 ..Default::default()
             },
 

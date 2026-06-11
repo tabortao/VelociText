@@ -49,6 +49,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Toast notification on transcription completion showing audio duration and elapsed time (4s auto-dismiss)
 - `transcribe.completedToast` i18n key for completion toast message (Chinese and English)
+- **Paraformer-Large ASR model support**: download from ModelScope (`iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-onnx`), higher accuracy Chinese speech recognition
+- **Model switching UI**: switch between SenseVoice-Small and Paraformer-Large in model management; active model highlighted with "Active" badge
+- **Per-model download**: individual download buttons for each model (SenseVoice-Small, Paraformer-Large, Silero VAD)
+- `download_specific_model`, `get_active_model`, `set_active_model` Tauri commands for model management
+- `activeModel` field in `AppConfig` for persisting the selected ASR model across restarts
+- Paraformer i18n keys (`models.paraformerDesc`, `models.activeModel`, `models.switchModel`, `models.switching`) in Chinese and English
 
 ### Changed
 - Updated supported format descriptions to accurately reflect symphonia capabilities: removed AVI and FLV (not supported by symphonia), added FLAC, OGG, AAC, M4A, AIFF. Updated in i18n strings, file dialog filters, and Rust `SUPPORTED_FORMATS` list
@@ -56,9 +62,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sidebar width**: reduced from `72 * spacing` to `52 * spacing` for a more compact layout
 - **Version display**: sidebar footer and About page now read version dynamically from `tauri.conf.json` via `getVersion()` API instead of hardcoding
 - Removed History page from navigation and app routing
-- Updated About page tech stack description: replaced "FFmpeg for audio/video decoding" with "symphonia for pure Rust audio/video decoding"
+- Updated README.md and README-zh.md: removed FFmpeg dependency, added Paraformer-Large and symphonia, updated tech stack and roadmap
+- **VAD optimization for Paraformer**: `max_speech_duration` automatically adjusted to 30s when Paraformer is active (vs 10s for SenseVoice)
+- `build_models()` now accepts `preferred_model` parameter and returns the active model name
+- Fixed `build_models` dir_name mismatch: was checking `"paraformer-large"` but `ModelType::Paraformer.dir_name()` returns `"paraformer"`
 
 ### Fixed
+- Updated About page tech stack description: replaced "FFmpeg for audio/video decoding" with "symphonia for pure Rust audio/video decoding"
 - **Video file transcription**: fixed symphonia selecting video codec track instead of audio track in video files. Restricted symphonia to audio-only features (mp3, aac, flac, vorbis, wav, ogg, isomp4, mkv, pcm, adpcm, aiff, caf) matching the official sherpa-onnx Tauri example. Removed overly strict `sample_rate`/`channels` presence check that incorrectly skipped audio tracks in MP4/MKV containers where these fields are not populated during probe phase.
 - **Video file audio sample rate detection**: fixed incorrect sample rate and channel count for video files. MP4/MKV containers often do not report `sample_rate` and `channels` in `codec_params` during the probe phase, causing the pipeline to default to 16000 Hz / 1 channel. This meant the resampler was never created for 44100/48000 Hz audio, resulting in garbled or empty ASR output. Now the actual sample rate and channel count are determined from the first decoded `AudioBufferRef` frame, and the resampler is created lazily with the correct rate.
 - Added detailed logging for track selection and first-frame audio metadata to aid future debugging

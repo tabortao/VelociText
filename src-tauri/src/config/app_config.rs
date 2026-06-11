@@ -15,6 +15,13 @@ pub struct AppConfig {
     pub use_vad: bool,
     /// FFmpeg 路径 (可选)
     pub ffmpeg_path: Option<String>,
+    /// 活跃 ASR 模型: "sense-voice-small" | "paraformer"
+    #[serde(default = "default_active_model")]
+    pub active_model: String,
+}
+
+fn default_active_model() -> String {
+    "sense-voice-small".to_string()
 }
 
 impl Default for AppConfig {
@@ -27,6 +34,7 @@ impl Default for AppConfig {
             export_format: "txt".into(),
             use_vad: true,
             ffmpeg_path: None,
+            active_model: default_active_model(),
         }
     }
 }

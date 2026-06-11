@@ -116,8 +116,12 @@ const dict = {
     "models.download": "一键下载",
     "models.downloading": "下载中...",
     "models.senseVoiceDesc": "支持中文/英文/粤语/日/韩，q8 量化约 230MB",
+    "models.paraformerDesc": "更高精度的中文语音识别，int8 量化约 238MB",
     "models.sileroVadDesc": "Silero VAD 语音活动检测模型，约 2.7MB",
-    "models.downloadHint": "SenseVoice-Small 模型从 ModelScope.cn 下载，q8 量化版本约 230MB。下载完成后自动安装到模型路径中。",
+    "models.downloadHint": "从 ModelScope.cn 下载模型，下载完成后自动安装到模型路径中。",
+    "models.activeModel": "当前使用",
+    "models.switchModel": "切换",
+    "models.switching": "切换中...",
 
     // About page
     "about.title": "关于",
@@ -247,8 +251,12 @@ const dict = {
     "models.download": "Download",
     "models.downloading": "Downloading...",
     "models.senseVoiceDesc": "Supports Chinese/English/Cantonese/Japanese/Korean, q8 quantized ~230MB",
+    "models.paraformerDesc": "Higher accuracy Chinese ASR, int8 quantized ~238MB",
     "models.sileroVadDesc": "Silero VAD voice activity detection model, ~2.7MB",
-    "models.downloadHint": "SenseVoice-Small model is downloaded from ModelScope.cn, q8 quantized version ~230MB. Automatically installed to the model path after download completes.",
+    "models.downloadHint": "Download models from ModelScope.cn. Automatically installed to the model path after download.",
+    "models.activeModel": "Active",
+    "models.switchModel": "Switch",
+    "models.switching": "Switching...",
 
     // About page
     "about.title": "About",

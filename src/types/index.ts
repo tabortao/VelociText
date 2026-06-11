@@ -65,6 +65,7 @@ export interface AppConfig {
   exportFormat: string;
   useVad: boolean;
   ffmpegPath: string | null;
+  activeModel: string;
 }
 
 /** 模型下载进度 */
