@@ -135,22 +135,46 @@ fn build_models(
         engine::recognizer_factory::RecognizerFactory::create(&model_type, &config)
     })) {
         Ok(Ok(r)) => {
-            let name = if config.model_dir.contains("paraformer") { "paraformer" } else { "sense-voice-small" };
+            let name = if config.model_dir.contains("paraformer") {
+                "paraformer"
+            } else if config.model_dir.contains("qwen3-asr") {
+                "qwen3-asr"
+            } else {
+                "sense-voice-small"
+            };
             (r, name.to_string())
         }
         Ok(Err(e)) => {
             log::error!("[build_models] failed to create {} recognizer: {e}", model_type.display_name());
             // Try to fall back to another available model
             let fallback_type = match model_type {
-                engine::recognizer_factory::ModelType::Paraformer
-                    if available.contains(&"sense-voice-small".to_string()) => {
-                    log::warn!("[build_models] falling back to SenseVoice-Small");
-                    Some(engine::recognizer_factory::ModelType::SenseVoice)
+                engine::recognizer_factory::ModelType::Paraformer => {
+                    if available.contains(&"sense-voice-small".to_string()) {
+                        log::warn!("[build_models] falling back to SenseVoice-Small");
+                        Some(engine::recognizer_factory::ModelType::SenseVoice)
+                    } else if available.contains(&"qwen3-asr".to_string()) {
+                        log::warn!("[build_models] falling back to Qwen3-ASR");
+                        Some(engine::recognizer_factory::ModelType::Qwen3Asr)
+                    } else { None }
+                }
+                engine::recognizer_factory::ModelType::Qwen3Asr => {
+                    if available.contains(&"sense-voice-small".to_string()) {
+                        log::warn!("[build_models] falling back to SenseVoice-Small");
+                        Some(engine::recognizer_factory::ModelType::SenseVoice)
+                    } else if available.contains(&"paraformer".to_string()) {
+                        log::warn!("[build_models] falling back to Paraformer");
+                        Some(engine::recognizer_factory::ModelType::Paraformer)
+                    } else { None }
                 }
                 engine::recognizer_factory::ModelType::SenseVoice
                     if available.contains(&"paraformer".to_string()) => {
                     log::warn!("[build_models] falling back to Paraformer");
                     Some(engine::recognizer_factory::ModelType::Paraformer)
+                }
+                engine::recognizer_factory::ModelType::SenseVoice
+                    if available.contains(&"qwen3-asr".to_string()) => {
+                    log::warn!("[build_models] falling back to Qwen3-ASR");
+                    Some(engine::recognizer_factory::ModelType::Qwen3Asr)
                 }
                 _ => None,
             };
@@ -180,13 +204,27 @@ fn build_models(
             log::error!("[build_models] {} recognizer creation panicked: {:?}", model_type.display_name(), panic_info);
             // Try to fall back to another available model
             let fallback_type = match model_type {
-                engine::recognizer_factory::ModelType::Paraformer
-                    if available.contains(&"sense-voice-small".to_string()) => {
-                    Some(engine::recognizer_factory::ModelType::SenseVoice)
+                engine::recognizer_factory::ModelType::Paraformer => {
+                    if available.contains(&"sense-voice-small".to_string()) {
+                        Some(engine::recognizer_factory::ModelType::SenseVoice)
+                    } else if available.contains(&"qwen3-asr".to_string()) {
+                        Some(engine::recognizer_factory::ModelType::Qwen3Asr)
+                    } else { None }
+                }
+                engine::recognizer_factory::ModelType::Qwen3Asr => {
+                    if available.contains(&"sense-voice-small".to_string()) {
+                        Some(engine::recognizer_factory::ModelType::SenseVoice)
+                    } else if available.contains(&"paraformer".to_string()) {
+                        Some(engine::recognizer_factory::ModelType::Paraformer)
+                    } else { None }
                 }
                 engine::recognizer_factory::ModelType::SenseVoice
                     if available.contains(&"paraformer".to_string()) => {
                     Some(engine::recognizer_factory::ModelType::Paraformer)
+                }
+                engine::recognizer_factory::ModelType::SenseVoice
+                    if available.contains(&"qwen3-asr".to_string()) => {
+                    Some(engine::recognizer_factory::ModelType::Qwen3Asr)
                 }
                 _ => None,
             };

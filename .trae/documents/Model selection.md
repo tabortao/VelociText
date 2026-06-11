@@ -6,12 +6,14 @@ Paraformer-large长音频模型集成VAD、ASR、标点与时间戳功能，可�
 - 热词版本：Paraformer-large热词版模型支持热词定制功能，基于提供的热词列表进行激励增强，提升热词的召回率和准确率。
 - 使用模型 csukuangfj/sherpa-onnx-paraformer-trilingual-zh-cantonese-en (Chinese + English + Cantonese 粤语)，详情 https://k2-fsa.github.io/sherpa/onnx/pretrained_models/offline-paraformer/paraformer-models.html#csukuangfj-sherpa-onnx-paraformer-trilingual-zh-cantonese-en-chinese-english-cantonese
 - 我压缩了int8量化模型上传到了 https://gitcode.com/tabortao/VelociText/releases/download/v0.1.2/paraformer.zip  推荐下载地址，用户可以直接下载并解压到 `paraformer/` 目录下
+- 纯中文用户，推荐使用 paraformer-large 模型。
 
 ##  Qwen3-ASR
 
 Qwen3-ASR 是由阿里云 Qwen 团队开发的一系列开源 ASR 模型，支持稳定的多语言语音/音乐/歌曲识别、语言检测和时间戳预测。
 - 使用模型 sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25，详情https://k2-fsa.github.io/sherpa/onnx/qwen3-asr/pretrained.html#sherpa-onnx-qwen3-asr-0-6b-int8-2026-03-25
 - 模型下载：https://gitcode.com/tabortao/VelociText/releases/download/model/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.zip  推荐下载地址，用户可以直接下载并解压到 `qwen3-asr/` 目录下
+- qwen3-asr-0.6B-int8模型较大，对电脑配置要求比较高，建议在性能较好的电脑上运行。
 
 ## SenseVoice-Small
 
@@ -26,4 +28,5 @@ Qwen3-ASR 是由阿里云 Qwen 团队开发的一系列开源 ASR 模型，支�
 - **服务部署：** 具有完整的服务部署链路，支持多并发请求，支持客户端语言有，python、c++、html、java与c#等。
 - https://k2-fsa.github.io/sherpa/onnx/sense-voice/index.html
 - https://www.modelscope.cn/models/iic/SenseVoiceSmall-onnx
+- 多语言用户，推荐使用 SenseVoice-Small 模型。
 
