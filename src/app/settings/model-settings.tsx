@@ -222,7 +222,7 @@ export function ModelSettingsPage() {
                 {model.name === "paraformer" && !isInstalled && (
                   <div className="mt-2 text-xs text-muted-foreground border-t pt-2">
                     <a
-                      href="https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-paraformer-trilingual-zh-cantonese-en.tar.bz2"
+                      href="https://gitcode.com/tabortao/VelociText/releases/download/v0.1.2/paraformer.zip"
                       target="_blank"
                       rel="noopener noreferrer"
                       className="underline hover:text-foreground"

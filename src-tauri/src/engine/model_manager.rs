@@ -134,7 +134,7 @@ impl ModelManager {
             ModelInfo {
                 name: "paraformer".into(),
                 display_name: "Paraformer (Trilingual)".into(),
-                size: "~170MB (int8)".into(),
+                size: "~233MB (int8)".into(),
                 installed: paraformer_installed,
                 path: if paraformer_installed {
                     Some(paraformer_path.to_string_lossy().to_string())
@@ -341,17 +341,12 @@ impl ModelManager {
 
     /// Download Paraformer Trilingual ASR model (sherpa-onnx official).
     ///
-    /// Downloads `sherpa-onnx-paraformer-trilingual-zh-cantonese-en` from GitHub releases
-    /// as a tar.bz2 archive and extracts `model.int8.onnx` and `tokens.txt` to the local
-    /// model directory.
+    /// Downloads `paraformer.zip` from gitcode.com releases and extracts
+    /// `model.int8.onnx` and `tokens.txt` to the local model directory.
     ///
     /// Users can also manually place model files in the `paraformer/` directory:
     /// - `model.int8.onnx` (or `model.onnx`) — the ONNX model
     /// - `tokens.txt` — vocabulary file
-    ///
-    /// Manual download from ModelScope (faster in China):
-    ///   https://www.modelscope.cn/models/QuadraV/speech_paraformer-large_asr_nat-zh-cantonese-en-16k-vocab8501-online-onnx/files
-    /// Download the tar.bz2, extract, and copy model.int8.onnx + tokens.txt to the paraformer/ folder.
     pub fn download_paraformer_large(
         &self,
         on_progress: &dyn Fn(DownloadProgress),
@@ -365,13 +360,12 @@ impl ModelManager {
             let tokens_path = model_dir.join("tokens.txt");
             if let Ok(content) = std::fs::read_to_string(&tokens_path) {
                 if !content.trim_start().starts_with('[') {
-                    // Check model file size is reasonable (int8 model is ~170MB)
                     let model_int8 = model_dir.join("model.int8.onnx");
                     let model_plain = model_dir.join("model.onnx");
                     let model_file = if model_int8.exists() { &model_int8 } else { &model_plain };
                     if model_file.exists() {
                         let model_size_ok = std::fs::metadata(model_file)
-                            .map(|m| m.len() > 50_000_000) // at least 50MB
+                            .map(|m| m.len() > 50_000_000)
                             .unwrap_or(false);
 
                         if model_size_ok {
@@ -393,12 +387,8 @@ impl ModelManager {
             std::fs::create_dir_all(&model_dir)?;
         }
 
-        // Download tar.bz2 from GitHub releases (sherpa-onnx official)
-        let archive_name = "sherpa-onnx-paraformer-trilingual-zh-cantonese-en";
-        let archive_url = format!(
-            "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/{}.tar.bz2",
-            archive_name
-        );
+        // Download zip from gitcode.com (fast in China)
+        let archive_url = "https://gitcode.com/tabortao/VelociText/releases/download/v0.1.2/paraformer.zip";
 
         on_progress(DownloadProgress {
             model_name: "paraformer".into(),
@@ -410,9 +400,9 @@ impl ModelManager {
 
         // Download to temp file
         let temp_dir = std::env::temp_dir();
-        let archive_path = temp_dir.join(format!("{}.tar.bz2", archive_name));
+        let archive_path = temp_dir.join("paraformer.zip");
 
-        download_file(&archive_url, &archive_path, "paraformer", on_progress)?;
+        download_file(archive_url, &archive_path, "paraformer", on_progress)?;
 
         on_progress(DownloadProgress {
             model_name: "paraformer".into(),
@@ -422,38 +412,31 @@ impl ModelManager {
             stage: "Extracting...".into(),
         });
 
-        // Extract tar.bz2
+        // Extract zip
         let file = std::fs::File::open(&archive_path)
             .map_err(|e| AppError::ModelDownload(format!("Open archive failed: {}", e)))?;
-        let bz2 = bzip2::read::BzDecoder::new(file);
-        let mut archive = tar::Archive::new(bz2);
+        let mut archive = zip::ZipArchive::new(file)
+            .map_err(|e| AppError::ModelDownload(format!("Read zip archive failed: {}", e)))?;
 
-        let entries: Vec<tar::Entry<_>> = archive.entries()
-            .map_err(|e| AppError::ModelDownload(format!("Read archive failed: {}", e)))?
-            .filter_map(|e| e.ok())
-            .collect();
+        for i in 0..archive.len() {
+            let mut entry = archive.by_index(i)
+                .map_err(|e| AppError::ModelDownload(format!("Read zip entry failed: {}", e)))?;
 
-        for mut entry in entries {
-            let relative = {
-                let path = entry.path().map_err(|e| AppError::ModelDownload(format!("Invalid path: {}", e)))?;
-                let path_str = path.to_string_lossy();
-                if path_str.starts_with(&format!("{}/", archive_name)) {
-                    Some(path_str[archive_name.len() + 1..].to_string())
-                } else {
-                    None
-                }
-            };
+            let name = entry.name().to_string();
+            // Extract filename from path (handle both "model.int8.onnx" and "subdir/model.int8.onnx")
+            let filename = std::path::Path::new(&name)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
 
-            if let Some(relative) = relative {
-                if relative == "model.int8.onnx" || relative == "tokens.txt" {
-                    let dest = model_dir.join(&relative);
-                    let mut file_content = Vec::new();
-                    entry.read_to_end(&mut file_content)
-                        .map_err(|e| AppError::ModelDownload(format!("Read entry failed: {}", e)))?;
-                    std::fs::write(&dest, &file_content)
-                        .map_err(|e| AppError::ModelDownload(format!("Write file failed: {}", e)))?;
-                    log::info!("[download_paraformer] extracted {}", relative);
-                }
+            if filename == "model.int8.onnx" || filename == "tokens.txt" {
+                let dest = model_dir.join(&filename);
+                let mut file_content = Vec::new();
+                std::io::Read::read_to_end(&mut entry, &mut file_content)
+                    .map_err(|e| AppError::ModelDownload(format!("Read entry failed: {}", e)))?;
+                std::fs::write(&dest, &file_content)
+                    .map_err(|e| AppError::ModelDownload(format!("Write file failed: {}", e)))?;
+                log::info!("[download_paraformer] extracted {}", filename);
             }
         }
 

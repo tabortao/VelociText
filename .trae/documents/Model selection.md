@@ -9,6 +9,7 @@ Paraformer-large长音频模型集成VAD、ASR、标点与时间戳功能，可�
 - https://k2-fsa.github.io/sherpa/onnx/pretrained_models/offline-paraformer/paraformer-models.html#csukuangfj-sherpa-onnx-paraformer-trilingual-zh-cantonese-en-chinese-english-cantonese
 - https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-paraformer-zh-2024-03-09.tar.bz2
 - https://www.modelscope.cn/models/QuadraV/speech_paraformer-large_asr_nat-zh-cantonese-en-16k-vocab8501-online-onnx/files  推荐下载地址
+- 我把模型上传到了 https://gitcode.com/tabortao/VelociText/releases/download/v0.1.2/paraformer.zip  推荐下载地址，用户可以直接下载并解压到 `paraformer/` 目录下
 
 
 ## SenseVoice-Small
