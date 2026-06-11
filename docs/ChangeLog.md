@@ -1,0 +1,133 @@
+# Changelog
+
+All notable changes to VelociText will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [v0.1.2] - 2026-06-11
+
+### Added
+- **Full transcription feature parity with sherpa-onnx official Tauri example**: `non-streaming-speech-recognition-from-file`
+- Pure Rust audio/video decoding via `symphonia` crate — no FFmpeg required for basic transcription
+  - Supports all major formats: MP3, FLAC, AAC, OGG, WAV, MP4, MKV, WebM, AIFF, M4A
+- **Streaming incremental pipeline**: packet-by-packet decode → VAD segmentation → ASR recognition without buffering the entire file
+- Built-in HTML5 `<video>` player with live subtitle overlay synchronized via `requestAnimationFrame` (~60fps)
+  - Sticky player that stays visible when scrolling through segments
+  - Player preview available during transcription processing
+  - Proper `assetProtocol` configuration for local media playback via `convertFileSrc`
+- **Click-to-seek**: click any segment row in the results table to jump playback to that segment
+- **Segment save**: export individual speech segments as standalone 16kHz WAV files
+- **VAD parameter configuration modal** (runtime adjustable via UI):
+  - Threshold (0.0–1.0)
+  - Minimum silence duration (seconds)
+  - Minimum speech duration (seconds)
+  - Maximum speech duration (seconds)
+  - Recognizer threads (1–16)
+- **Cancellation support**: cancel recognition mid-processing and keep partial results
+- Copy actions:
+  - Copy plain text
+  - Copy with timestamps (SRT-style format)
+- Export actions:
+  - Export SRT subtitle file
+  - Export TXT text file
+- Background model initialization — models loaded on app startup so first transcription is faster
+- Progress polling with incremental segment updates — results appear as they're recognized
+- Real-time RTF (Real-Time Factor) calculation and speed display after completion
+- **Flash/toast notifications** for copy and save confirmations (2.5s auto-dismiss)
+- Dynamic status text showing segment count and character count during processing
+
+### Changed
+- Transcription page completely refactored to the new streaming architecture
+- Transcription progress updated incrementally instead of waiting for full completion
+- VAD now uses Sherpa-ONNX Silero VAD directly on streaming audio instead of post-processing RMS energy
+- Segments recognized by ASR immediately after VAD detection, results incrementally added to UI
+- Table-based segment display with save button per-segment
+- Player URL now properly computed via `convertFileSrc` from `@tauri-apps/api/core` instead of fragile global access
+- Enabled `protocol-asset` Tauri feature with scope `["**"]` for local media file playback
+
+### Added
+- Toast notification on transcription completion showing audio duration and elapsed time (4s auto-dismiss)
+- `transcribe.completedToast` i18n key for completion toast message (Chinese and English)
+
+### Changed
+- Updated supported format descriptions to accurately reflect symphonia capabilities: removed AVI and FLV (not supported by symphonia), added FLAC, OGG, AAC, M4A, AIFF. Updated in i18n strings, file dialog filters, and Rust `SUPPORTED_FORMATS` list
+- **File drag-and-drop**: replaced HTML5 `onDrop` with Tauri `DragDropEvent` listener. The Rust backend already emits `tauri://file-drop` and `tauri://file-drop-hover` events; the frontend now listens for these instead of relying on `DataTransfer.path` which is unavailable in Tauri v2
+- **Sidebar width**: reduced from `72 * spacing` to `52 * spacing` for a more compact layout
+- **Version display**: sidebar footer and About page now read version dynamically from `tauri.conf.json` via `getVersion()` API instead of hardcoding
+- Removed History page from navigation and app routing
+- Updated About page tech stack description: replaced "FFmpeg for audio/video decoding" with "symphonia for pure Rust audio/video decoding"
+
+### Fixed
+- **Video file transcription**: fixed symphonia selecting video codec track instead of audio track in video files. Restricted symphonia to audio-only features (mp3, aac, flac, vorbis, wav, ogg, isomp4, mkv, pcm, adpcm, aiff, caf) matching the official sherpa-onnx Tauri example. Removed overly strict `sample_rate`/`channels` presence check that incorrectly skipped audio tracks in MP4/MKV containers where these fields are not populated during probe phase.
+- **Video file audio sample rate detection**: fixed incorrect sample rate and channel count for video files. MP4/MKV containers often do not report `sample_rate` and `channels` in `codec_params` during the probe phase, causing the pipeline to default to 16000 Hz / 1 channel. This meant the resampler was never created for 44100/48000 Hz audio, resulting in garbled or empty ASR output. Now the actual sample rate and channel count are determined from the first decoded `AudioBufferRef` frame, and the resampler is created lazily with the correct rate.
+- Added detailed logging for track selection and first-frame audio metadata to aid future debugging
+
+- Removed unused `numThreads` TypeScript variable causing build error
+- Fixed `convertFileSrc` not working properly by adding `assetProtocol` configuration
+
+## [v0.1.1] - 2026-06-10
+
+### Added
+- VAD (Voice Activity Detection) using RMS energy-based silence detection for automatic speech segmentation
+- VAD toggle in Settings page — enable to split audio at silence points and recognize each segment independently
+- Batch transcription: select multiple files at once and transcribe them sequentially with shared model loading
+- Batch results summary panel in transcription page — click individual results to switch between files
+- `transcribe_batch` Tauri command for backend batch processing
+- `BatchResult` and `BatchFileResult` types for batch transcription results
+- `HistoryEntry` TypeScript type for history record display
+- FFmpeg startup detection with warning banner in main view when not installed
+- `export_to_file` Rust command for direct file writing (bypasses Tauri fs plugin scope restrictions)
+- `open_file_with_system` Rust command for cross-platform file opening with system default application
+- Acknowledgments section in README.md and README-zh.md crediting sherpa-onnx, SenseVoice, Silero VAD, Tauri, React, shadcn/ui, FFmpeg, and ModelScope
+
+### Changed
+- `RecognizerFactory` now respects `num_threads` and `use_itn` from `RecognizerConfig`
+- VAD setting in transcription page reads from app config instead of being hardcoded to false
+- Play button now opens file via Rust `open_file_with_system` command instead of `tauri-plugin-opener`
+- Export writes files via Rust `export_to_file` command instead of frontend `writeTextFile` (fs plugin)
+- Export functions now display error messages to user when export fails
+- Merged TXT/SRT/VTT export buttons into a single "Export" button with save-as dialog supporting all three formats
+
+### Fixed
+- Missing `HistoryEntry` type in TypeScript type definitions
+- Unused `batchActiveFile` state causing `tsc` build failure
+- Smart sentence segmentation not applied within VAD segments (text was distributed as raw blocks)
+- TXT/SRT/VTT export silently failing without user-facing error feedback
+- Removed unused `VadSegment::samples` field and `write_wav_segment` function
+- Model management page header showing raw i18n key `header.model-settings` instead of translated title
+- Play button not opening files with system default player
+- Export save dialog failing to write files due to Tauri fs plugin scope restrictions
+
+## [v0.1.0] - 2026-06-09
+
+### Added
+- Initial project scaffolding based on Tauri v2 + React 19 + TypeScript + shadcn/ui
+- Left sidebar navigation: Transcription, History, Settings, Model Management
+- Core speech recognition engine using sherpa-onnx framework with SenseVoice-Small model (int8 quantized)
+- Multi-model architecture (`RecognizerFactory`) supporting SenseVoice, Paraformer, Zipformer CTC, and Transducer model types
+- FFmpeg-based audio extraction to 16kHz Mono WAV with hidden console window on Windows
+- Native file drag-and-drop support via Rust `DragDropEvent`
+- Real-time progress reporting via `tokio::spawn_blocking` + `mpsc::channel` with frontend event listening
+- Elapsed time and audio duration display after transcription
+- Smart sentence segmentation based on Chinese/English punctuation marks with proportional timestamps
+- Multi-format export: TXT (with timestamps), SRT, VTT subtitle files using original filename
+- Model management page with one-click download of SenseVoice-Small from ModelScope.cn
+- FFmpeg auto-detection with version display in Settings page
+- Settings page: language selection, export format, VAD toggle
+- File-based history persistence (JSON) with save, load, delete, and clear operations
+- Audio player (Play/Pause) in transcription results
+- "New" button to transcribe another file after completion without clearing results
+- Custom hotwords support via `hotwords_file` and `hotwords_score` config
+- Application binary renamed to `velocitext.exe`
+- Version display in sidebar footer matches ChangeLog version
+- Cleaned up old tauri-ui template files (nav-*, greet, data-table, chart, debug-panel, theme-provider, etc.)
+- bun as package manager
+
+### Fixed
+- Missing `tokens` field in `OfflineModelConfig` causing recognizer creation failure
+- `@tauri-apps/plugin-dialog` dynamic import resolution
+- Model file path resolution to support `model_q8.onnx` filename
+- FFmpeg console window popup on Windows by using `CREATE_NO_WINDOW` flag
+- Binary name from `tauri-native` to `velocitext`
+- Missing `Progress` shadcn/ui component

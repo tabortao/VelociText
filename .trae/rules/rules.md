@@ -1,0 +1,2 @@
+- 使用bun，而不是node
+- 每次完成任务后，使用 `bun run tauri build`构建项目

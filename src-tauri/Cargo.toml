@@ -1,0 +1,78 @@
+[package]
+name = "velocitext"
+version = "0.1.1"
+description = "VelociText - Audio/Video to Text Transcription"
+authors = ["you"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "velocitext_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+log = "0.4"
+tauri-plugin-log = "2"
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# 语音识别
+sherpa-onnx = "1.13"
+
+# 纯 Rust 音频解码（替代 FFmpeg 提取）
+# 只启用音频 codec，禁用视频 codec，确保视频文件正确选择音频轨
+symphonia = { version = "0.5", features = [
+    "mp3",
+    "aac",
+    "flac",
+    "vorbis",
+    "wav",
+    "ogg",
+    "isomp4",
+    "mkv",
+    "pcm",
+    "adpcm",
+    "aiff",
+    "caf",
+] }
+
+# 异步运行时
+tokio = { version = "1", features = ["full"] }
+
+# 文件处理
+tempfile = "3"
+
+# 错误处理
+anyhow = "1"
+thiserror = "2"
+
+# 日期时间
+chrono = { version = "0.4", features = ["serde"] }
+
+# HTTP 下载
+ureq = { version = "2", features = ["tls"] }
+
+# 7z 解压 (FFmpeg 下载)
+sevenz-rust = "0.6"
+
+
+[profile.dev]
+incremental = true # Compile your binary in smaller steps.
+
+[profile.release]
+codegen-units = 1 # Allows LLVM to perform better optimization.
+lto = true        # Enables link-time-optimizations.
+opt-level = "s"   # Prioritizes small binary size. Use `3` if you prefer speed.
+panic = "abort"   # Higher performance by disabling panic handlers.
+strip = true      # Ensures debug symbols are removed.
