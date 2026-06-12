@@ -99,6 +99,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Removed unused `numThreads` TypeScript variable causing build error
 - Fixed `convertFileSrc` not working properly by adding `assetProtocol` configuration
+- **Updated application icons**: regenerated using `tauri icon` command from `source-icon.png`, creating complete icon sets for Windows, macOS, iOS, and Android platforms
 
 ## [v0.1.1] - 2026-06-10
 

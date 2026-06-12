@@ -3,35 +3,50 @@
 ## Summary
 
 Add a dictionary panel below the transcription page with two tabs:
-- **替换词典 (Replacements)**: Post-processing text replacement rules (original → replacement)
-- **专有名词 (Hotwords)**: ASR hotwords with weights to boost recognition accuracy
+
+* **替换词典 (Replacements)**: Post-processing text replacement rules (original → replacement)
+
+* **专有名词 (Hotwords)**: ASR hotwords with weights to boost recognition accuracy
 
 The Rust backend (config, commands, model rebuild) is already implemented. This plan covers the remaining work: applying replacements in the pipeline and building the frontend UI.
 
----
+***
 
 ## Current State Analysis
 
 ### Rust Backend (DONE)
-- `src-tauri/src/config/dictionary_config.rs`: `DictionaryConfig` struct with `HotwordEntry` / `ReplacementEntry`, load/save from `AppData\Roaming\VelociText\dictionary.json`, `generate_hotwords_file()` produces `hotwords.txt` in `word weight` format, `apply_replacements()` performs text substitution
-- `src-tauri/src/commands/dictionary.rs`: 4 Tauri commands (`get_dictionary_config`, `save_hotwords`, `save_replacements`, `get_hotwords_file_path`), `save_hotwords` rebuilds recognizer automatically
-- `src-tauri/src/lib.rs`: `AppState` has `dictionary_config` and `hotwords_file_path` fields; `build_models()` accepts `hotwords_file: Option<String>`; all 4 commands registered in `invoke_handler`
-- `src-tauri/src/config/mod.rs`: `pub mod dictionary_config;`
-- `src-tauri/src/commands/mod.rs`: `pub mod dictionary;`
+
+* `src-tauri/src/config/dictionary_config.rs`: `DictionaryConfig` struct with `HotwordEntry` / `ReplacementEntry`, load/save from `AppData\Roaming\VelociText\dictionary.json`, `generate_hotwords_file()` produces `hotwords.txt` in `word weight` format, `apply_replacements()` performs text substitution
+
+* `src-tauri/src/commands/dictionary.rs`: 4 Tauri commands (`get_dictionary_config`, `save_hotwords`, `save_replacements`, `get_hotwords_file_path`), `save_hotwords` rebuilds recognizer automatically
+
+* `src-tauri/src/lib.rs`: `AppState` has `dictionary_config` and `hotwords_file_path` fields; `build_models()` accepts `hotwords_file: Option<String>`; all 4 commands registered in `invoke_handler`
+
+* `src-tauri/src/config/mod.rs`: `pub mod dictionary_config;`
+
+* `src-tauri/src/commands/mod.rs`: `pub mod dictionary;`
 
 ### Missing: Replacements Not Applied in Streaming Pipeline
-- `recognize_segment()` in `transcription_pipeline.rs` stores raw ASR text without applying replacements
-- `get_recognition_progress()` returns raw segments without replacements
-- `export_to_file()` exports raw segments without replacements
-- Copy functions on frontend copy raw text
+
+* `recognize_segment()` in `transcription_pipeline.rs` stores raw ASR text without applying replacements
+
+* `get_recognition_progress()` returns raw segments without replacements
+
+* `export_to_file()` exports raw segments without replacements
+
+* Copy functions on frontend copy raw text
 
 ### Missing: Frontend
-- No TypeScript types for dictionary entries
-- No i18n keys for dictionary UI
-- No dictionary panel component
-- Transcription page doesn't include dictionary panel
 
----
+* No TypeScript types for dictionary entries
+
+* No i18n keys for dictionary UI
+
+* No dictionary panel component
+
+* Transcription page doesn't include dictionary panel
+
+***
 
 ## Proposed Changes
 
@@ -44,6 +59,7 @@ The Rust backend (config, commands, model rebuild) is already implemented. This 
 **Why:** The simplest single-point approach — all consumers (polling frontend display, copy, export) get replaced text. This avoids modifying the pipeline internals or the export function separately.
 
 **How:**
+
 ```rust
 pub fn get_recognition_progress(state: State<'_, AppState>) -> Result<ProcessingState, String> {
     let percent = state.progress.load(Ordering::Relaxed);
@@ -69,7 +85,7 @@ pub fn get_recognition_progress(state: State<'_, AppState>) -> Result<Processing
 
 **Note:** The old `export_to_file` command receives segments from the frontend (already replaced), so no change needed there.
 
----
+***
 
 ### 2. Frontend: TypeScript types
 
@@ -78,6 +94,7 @@ pub fn get_recognition_progress(state: State<'_, AppState>) -> Result<Processing
 **Change:** Add dictionary-related type definitions at the end of the file.
 
 **New types:**
+
 ```typescript
 /** 热词条目 */
 export interface HotwordEntry {
@@ -98,7 +115,7 @@ export interface DictionaryConfig {
 }
 ```
 
----
+***
 
 ### 3. Frontend: i18n keys
 
@@ -107,6 +124,7 @@ export interface DictionaryConfig {
 **Change:** Add dictionary-related i18n keys in both `zh` and `en` dictionaries.
 
 **New keys (zh):**
+
 ```typescript
 // Dictionary
 "dictionary.title": "词典",
@@ -137,6 +155,7 @@ export interface DictionaryConfig {
 ```
 
 **New keys (en):**
+
 ```typescript
 // Dictionary
 "dictionary.title": "Dictionary",
@@ -166,7 +185,7 @@ export interface DictionaryConfig {
 "dictionary.replacementSaved": "Replacement rules saved",
 ```
 
----
+***
 
 ### 4. Frontend: Dictionary panel component
 
@@ -175,6 +194,7 @@ export interface DictionaryConfig {
 **What:** A card component with two tabs using shadcn/ui `Tabs` component.
 
 **Structure:**
+
 ```
 <Card>
   <CardHeader>
@@ -205,21 +225,32 @@ export interface DictionaryConfig {
 ```
 
 **State management:**
-- `hotwords: HotwordEntry[]` — loaded from `get_dictionary_config` on mount
-- `replacements: ReplacementEntry[]` — loaded from `get_dictionary_config` on mount
-- `saving: boolean` — saving state indicator
-- `rebuilding: boolean` — model rebuilding indicator (hotwords only)
+
+* `hotwords: HotwordEntry[]` — loaded from `get_dictionary_config` on mount
+
+* `replacements: ReplacementEntry[]` — loaded from `get_dictionary_config` on mount
+
+* `saving: boolean` — saving state indicator
+
+* `rebuilding: boolean` — model rebuilding indicator (hotwords only)
 
 **Key behaviors:**
-- Load config from backend on component mount via `invoke("get_dictionary_config")`
-- Add/remove entries locally (optimistic UI)
-- Save button calls `invoke("save_hotwords", { hotwords })` or `invoke("save_replacements", { replacements })`
-- For hotwords: saving triggers model rebuild, show "Rebuilding..." status
-- For replacements: saving is instant, show "Saved" flash
-- While model is rebuilding (after hotwords save), disable the Start Transcription button
-- Input validation: weight must be 0.0-10.0, word must not be empty
 
----
+* Load config from backend on component mount via `invoke("get_dictionary_config")`
+
+* Add/remove entries locally (optimistic UI)
+
+* Save button calls `invoke("save_hotwords", { hotwords })` or `invoke("save_replacements", { replacements })`
+
+* For hotwords: saving triggers model rebuild, show "Rebuilding..." status
+
+* For replacements: saving is instant, show "Saved" flash
+
+* While model is rebuilding (after hotwords save), disable the Start Transcription button
+
+* Input validation: weight must be 0.0-10.0, word must not be empty
+
+***
 
 ### 5. Frontend: Integrate dictionary panel into transcribe page
 
@@ -228,6 +259,7 @@ export interface DictionaryConfig {
 **Change:** Add the `<DictionaryPanel />` component below the main transcription card, inside the `space-y-4` container.
 
 **How:**
+
 ```tsx
 import { DictionaryPanel } from "@/components/dictionary-panel"
 
@@ -237,11 +269,12 @@ import { DictionaryPanel } from "@/components/dictionary-panel"
 
 **Also:** While the dictionary panel is saving hotwords (rebuilding), the transcription should be blocked. The `DictionaryPanel` can expose a callback or use the `modelsReady` state. Simplest approach: when hotwords save triggers model rebuild, the dictionary panel can emit a "rebuilding" state that the parent page uses to disable the file selection UI.
 
----
+***
 
 ### 6. Build & Changelog
 
 **Commands:**
+
 ```
 bun run tauri build
 ```
@@ -250,11 +283,11 @@ bun run tauri build
 
 **Change:** Add entry for v0.1.2-20260611 (or current date version) documenting the dictionary feature.
 
----
+***
 
 ## Assumptions & Decisions
 
-1. **Replacements applied in `get_recognition_progress`**: Single point of application, all downstream consumers (display, copy, export) get replaced text. The stored raw segments remain unchanged, but this is acceptable since the dictionary config is available at query time.
+1. **Replacements applied in** **`get_recognition_progress`**: Single point of application, all downstream consumers (display, copy, export) get replaced text. The stored raw segments remain unchanged, but this is acceptable since the dictionary config is available at query time.
 
 2. **Model rebuild on hotwords save**: Reuses the existing `rebuild_recognizer` logic in `commands/dictionary.rs`. The frontend should show a loading state while the model rebuilds.
 
@@ -266,7 +299,7 @@ bun run tauri build
 
 6. **State shared via props/events**: The dictionary panel and transcription page communicate via the shared `modelsReady` state. When hotwords save triggers rebuild, `modelsReady` becomes `false` temporarily.
 
----
+***
 
 ## Verification
 
@@ -276,3 +309,4 @@ bun run tauri build
 4. Manual test: add a replacement rule, save, verify text is replaced in transcription results
 5. Manual test: switch between tabs, verify data persists
 6. Manual test: verify i18n works in both Chinese and English
+

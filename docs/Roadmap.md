@@ -1,7 +1,8 @@
 ## Planning
 
 - [X] 增加paraformer large onnx模型支持，https://k2-fsa.github.io/sherpa/onnx/paraformer/index.html
-- [ ] 增加词典功能
+- [ ] 增加词典(hotwords)功能:https://k2-fsa.github.io/sherpa/onnx/hotwords/index.html ，已知问题，专有名词（热词）还不起作用，暂时推荐使用替换词典。
+- [ ] 智能标点：https://k2-fsa.github.io/sherpa/onnx/punctuation/index.html
 - [ ] 增加AI优化转录结果的功能
 - [X] 参考 https://github.com/k2-fsa/sherpa-onnx/blob/master/tauri-examples/non-streaming-speech-recognition-from-file/README.md 进行改进。
 - [X] symphonia 替代 FFmpeg：纯 Rust 实现，无系统依赖，可直接打包进 Tauri 应用，支持从视频容器中提取音频 
