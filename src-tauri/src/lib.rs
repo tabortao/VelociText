@@ -19,7 +19,9 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::webview::PageLoadEvent;
-use tauri::{Emitter, WindowEvent};
+use tauri::{Emitter, Manager, WindowEvent};
+use tauri::tray::{TrayIconBuilder, MouseButton, MouseButtonState, TrayIconEvent};
+use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri_plugin_log::{Target, TargetKind};
 use tauri_plugin_opener::OpenerExt;
 
@@ -49,6 +51,9 @@ pub struct AppState {
     /// OCR engine instance (session reuse for performance).
     /// References snow-shot's OcrService pattern.
     pub ocr_engine: Arc<Mutex<Option<OcrEngine>>>,
+    /// Pending screenshot data for the screenshot selection window.
+    /// Stored by `start_screenshot_selection`, retrieved by `get_screenshot_data`.
+    pub pending_screenshot: Arc<Mutex<Option<serde_json::Value>>>,
 }
 
 /// Build the ASR recognizer and Silero VAD from the configured model path.
@@ -575,6 +580,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(external_navigation_plugin())
         .manage(AppState {
             config: Mutex::new(initial_config),
@@ -600,6 +606,7 @@ pub fn run() {
             hotwords_file_path,
             active_ocr_model: Arc::new(Mutex::new(active_ocr_model)),
             ocr_engine: Arc::new(Mutex::new(None)),
+            pending_screenshot: Arc::new(Mutex::new(None)),
         })
         .invoke_handler(tauri::generate_handler![
             // 转录命令 (旧)
@@ -646,13 +653,63 @@ pub fn run() {
             // OCR 命令
             commands::ocr::ocr_recognize,
             commands::ocr::ocr_recognize_bytes,
-            commands::ocr::capture_screenshot,
+            commands::ocr::capture_all_monitors,
             commands::ocr::ocr_screenshot_region,
+            commands::ocr::start_screenshot_selection,
+            commands::ocr::get_screenshot_data,
+            commands::ocr::close_screenshot_window,
+            commands::ocr::screenshot_ocr_done,
             commands::ocr::copy_text_to_clipboard,
             commands::ocr::ocr_get_active_model,
             commands::ocr::ocr_set_active_model,
             commands::ocr::ocr_release,
         ])
+        .setup(|app| {
+            // System tray — references snow-shot's tray implementation
+            let show = MenuItemBuilder::with_id("show", "显示 VelociText")
+                .build(app)?;
+            let quit = MenuItemBuilder::with_id("quit", "退出")
+                .build(app)?;
+            let menu = MenuBuilder::new(app)
+                .items(&[&show, &quit])
+                .build()?;
+
+            let _tray = TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .menu(&menu)
+                .tooltip("VelociText")
+                .on_menu_event(|app, event| {
+                    match event.id().as_ref() {
+                        "show" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                        "quit" => {
+                            app.exit(0);
+                        }
+                        _ => {}
+                    }
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                })
+                .build(app)?;
+
+            Ok(())
+        })
         .on_page_load(|webview, payload| {
             if webview.label() == "main" && matches!(payload.event(), PageLoadEvent::Finished) {
                 log::info!("VelociText main webview loaded");
@@ -660,6 +717,15 @@ pub fn run() {
             }
         })
         .on_window_event(|window, event| {
+            // Close to tray instead of quitting (only for main window)
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    api.prevent_close();
+                    let _ = window.hide();
+                    return;
+                }
+                // Screenshot window and other windows close normally
+            }
             if let WindowEvent::DragDrop(taura_drop_event) = event {
                 use tauri::DragDropEvent;
                 match taura_drop_event {

@@ -8,7 +8,7 @@
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "bun run build",
     "frontendDist": "../dist",
-    "removeUnusedCommands": true
+    "removeUnusedCommands": false
   },
   "app": {
     "withGlobalTauri": true,

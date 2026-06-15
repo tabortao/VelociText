@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { AppSidebar } from "@/components/app-sidebar"
 import {
   SidebarInset,
@@ -14,6 +14,7 @@ import { ModelSettingsPage } from "@/app/settings/model-settings"
 import { AboutPage } from "@/app/about/page"
 import { AppProvider } from "@/lib/app-context"
 import { invoke } from "@tauri-apps/api/core"
+import { listen, type UnlistenFn } from "@tauri-apps/api/event"
 import type { AppConfig } from "@/types"
 
 export type Page = "transcribe" | "dictionary" | "ocr" | "settings" | "model-settings" | "about"
@@ -21,6 +22,8 @@ export type Page = "transcribe" | "dictionary" | "ocr" | "settings" | "model-set
 export default function App() {
   const [currentPage, setCurrentPage] = useState<Page>("transcribe")
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [ocrModelVersion, setOcrModelVersion] = useState("ppocr-v5")
+  const unlistenRef = useRef<UnlistenFn | null>(null)
 
   // Load sidebar state from config on mount
   useEffect(() => {
@@ -34,6 +37,118 @@ export default function App() {
     }
     load()
   }, [])
+
+  // Load OCR model version
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const model = await invoke<string>("ocr_get_active_model")
+        setOcrModelVersion(model)
+      } catch {
+        // ignore
+      }
+    }
+    load()
+  }, [])
+
+  // Listen for screenshot OCR result events from the main window
+  // (Rust emits this to the main window after the screenshot window completes OCR)
+  useEffect(() => {
+    let unlistenResult: UnlistenFn | undefined
+
+    const setup = async () => {
+      try {
+        unlistenResult = await listen<{
+          text: string
+          timeMs: number
+        }>("screenshot-ocr-result", (event) => {
+          const { text, timeMs } = event.payload
+          // Navigate to OCR page to show results
+          setCurrentPage("ocr")
+          // The OCR page will receive the result via a custom event
+          window.dispatchEvent(
+            new CustomEvent("velocitext:screenshot-ocr-result", {
+              detail: { text, timeMs },
+            })
+          )
+        })
+      } catch {
+        // ignore
+      }
+    }
+    setup()
+
+    return () => {
+      unlistenResult?.()
+    }
+  }, [])
+
+  // Register global shortcut for screenshot OCR
+  useEffect(() => {
+    let cancelled = false
+
+    const register = async () => {
+      try {
+        const { register: registerShortcut, unregister } = await import(
+          "@tauri-apps/plugin-global-shortcut"
+        )
+
+        // Load the configured shortcut from config
+        let shortcut = "Ctrl+Shift+O"
+        try {
+          const config = await invoke<AppConfig>("get_app_config")
+          if (config.ocrScreenshotShortcut) {
+            shortcut = config.ocrScreenshotShortcut
+          }
+        } catch {
+          // use default
+        }
+
+        // Unregister any previous shortcut
+        try {
+          await unregister(shortcut)
+        } catch {
+          // might not be registered
+        }
+
+        await registerShortcut(shortcut, async (event) => {
+          if (event.state === "Pressed" && !cancelled) {
+            triggerScreenshot()
+          }
+        })
+
+        unlistenRef.current = () => {
+          unregister(shortcut).catch(() => {})
+        }
+      } catch (err) {
+        console.error("Failed to register global shortcut:", err)
+      }
+    }
+
+    register()
+
+    return () => {
+      cancelled = true
+      unlistenRef.current?.()
+    }
+  }, [])
+
+  // Trigger screenshot: capture + open transparent fullscreen window
+  const triggerScreenshot = useCallback(async () => {
+    try {
+      // Refresh OCR model version
+      try {
+        const model = await invoke<string>("ocr_get_active_model")
+        setOcrModelVersion(model)
+      } catch {
+        // keep current
+      }
+
+      await invoke("start_screenshot_selection", { modelVersion: ocrModelVersion })
+    } catch (err) {
+      console.error("Screenshot capture failed:", err)
+    }
+  }, [ocrModelVersion])
 
   // Persist sidebar state to config
   const handleSidebarOpenChange = useCallback(async (open: boolean) => {
@@ -54,7 +169,7 @@ export default function App() {
       case "dictionary":
         return <DictionaryPage />
       case "ocr":
-        return <OCRPage />
+        return <OCRPage onScreenshotTrigger={triggerScreenshot} />
       case "settings":
         return <SettingsPage />
       case "model-settings":

@@ -2,15 +2,7 @@ use crate::engine::model_manager::is_ppocr_installed_at;
 use crate::engine::ocr::{types::OcrResult, OcrEngine};
 use crate::AppState;
 use std::path::Path;
-
-/// Result of screen capture — returns the image path for frontend region selection.
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ScreenshotCapture {
-    pub image_path: String,
-    pub width: u32,
-    pub height: u32,
-}
+use tauri::{Emitter, Manager};
 
 /// Run OCR on an image file using the specified model version.
 ///
@@ -103,37 +95,14 @@ pub async fn ocr_recognize_bytes(
     .map_err(|e| format!("OCR task failed: {e}"))?
 }
 
-/// Capture the primary monitor and save screenshot to a temp file.
-/// Returns the image path and dimensions for the frontend to display a region selection overlay.
+/// Capture all monitors and stitch them into a single screenshot.
+/// Returns the image path, dimensions, and bounding box for positioning the screenshot window.
+/// References snow-shot's `capture_all_monitors` command.
 #[tauri::command]
-pub async fn capture_screenshot() -> Result<ScreenshotCapture, String> {
-    tokio::task::spawn_blocking(move || {
-        let monitors =
-            xcap::Monitor::all().map_err(|e| format!("Failed to enumerate monitors: {e}"))?;
-        let primary = monitors
-            .into_iter()
-            .find(|m| m.is_primary())
-            .ok_or_else(|| "No primary monitor found".to_string())?;
-        let image = primary
-            .capture_image()
-            .map_err(|e| format!("Failed to capture screen: {e}"))?;
-
-        let width = image.width();
-        let height = image.height();
-
-        let temp_path = std::env::temp_dir().join("velocitext_screenshot.png");
-        image
-            .save(&temp_path)
-            .map_err(|e| format!("Failed to save screenshot: {e}"))?;
-
-        Ok(ScreenshotCapture {
-            image_path: temp_path.to_string_lossy().to_string(),
-            width,
-            height,
-        })
-    })
-    .await
-    .map_err(|e| format!("Screenshot capture failed: {e}"))?
+pub async fn capture_all_monitors() -> Result<serde_json::Value, String> {
+    tokio::task::spawn_blocking(move || capture_all_monitors_inner())
+        .await
+        .map_err(|e| format!("Screenshot capture failed: {e}"))?
 }
 
 /// Run OCR on a cropped region of a captured screenshot.
@@ -257,4 +226,181 @@ pub async fn ocr_release(state: tauri::State<'_, AppState>) -> Result<(), String
     *engine = None;
     log::info!("[ocr_release] engine released");
     Ok(())
+}
+
+/// Start screenshot selection by creating a transparent fullscreen window.
+/// References snow-shot's `create_draw_window` — transparent, frameless, always-on-top
+/// window covering all monitors with screenshot displayed at 1:1 scale.
+///
+/// The screenshot data is stored in AppState and retrieved by the screenshot window
+/// via `get_screenshot_data` command, avoiding event timing issues.
+#[tauri::command]
+pub async fn start_screenshot_selection(
+    app: tauri::AppHandle,
+    model_version: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    // Step 1: Capture all monitors
+    let capture_result = capture_all_monitors_inner()?;
+
+    let bbox = capture_result
+        .get("boundingBox")
+        .ok_or("Missing boundingBox")?;
+    let min_x = bbox["minX"].as_i64().ok_or("Missing minX")? as i32;
+    let min_y = bbox["minY"].as_i64().ok_or("Missing minY")? as i32;
+    let bbox_width = bbox["width"].as_u64().ok_or("Missing bbox width")? as u32;
+    let bbox_height = bbox["height"].as_u64().ok_or("Missing bbox height")? as u32;
+
+    // Step 2: Store screenshot data in AppState for the screenshot window to retrieve
+    {
+        let mut pending = state.pending_screenshot.lock().map_err(|e| e.to_string())?;
+        *pending = Some(serde_json::json!({
+            "imagePath": capture_result["imagePath"],
+            "width": capture_result["width"],
+            "height": capture_result["height"],
+            "modelVersion": model_version,
+        }));
+    }
+
+    // Step 3: Close any existing screenshot window
+    if let Some(existing) = app.get_webview_window("screenshot") {
+        let _ = existing.close();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+
+    // Step 4: Create transparent fullscreen window covering all monitors
+    let _window = tauri::WebviewWindowBuilder::new(&app, "screenshot", tauri::WebviewUrl::App("screenshot.html".into()))
+        .title("VelociText Screenshot")
+        .inner_size(bbox_width as f64, bbox_height as f64)
+        .position(min_x as f64, min_y as f64)
+        .transparent(true)
+        .decorations(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .resizable(false)
+        .shadow(false)
+        .build()
+        .map_err(|e| format!("Failed to create screenshot window: {e}"))?;
+
+    log::info!(
+        "[start_screenshot_selection] window created, size={}x{}, pos=({},{})",
+        bbox_width,
+        bbox_height,
+        min_x,
+        min_y
+    );
+
+    Ok(capture_result)
+}
+
+/// Get the pending screenshot data. Called by the screenshot window after it finishes loading.
+/// Returns the data once and clears it from AppState.
+#[tauri::command]
+pub async fn get_screenshot_data(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let mut pending = state.pending_screenshot.lock().map_err(|e| e.to_string())?;
+    pending
+        .take()
+        .ok_or("No pending screenshot data".to_string())
+}
+
+/// Close the screenshot window. Called from the screenshot window itself after
+/// region selection or ESC cancel. References snow-shot's `closeWindowAfterDelay`.
+#[tauri::command]
+pub async fn close_screenshot_window(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("screenshot") {
+        window
+            .close()
+            .map_err(|e| format!("Failed to close screenshot window: {e}"))?;
+        log::info!("[close_screenshot_window] screenshot window closed");
+    }
+    Ok(())
+}
+
+/// Called from the screenshot window after OCR completes.
+/// Emits the result to the main window so it can display the result.
+#[tauri::command]
+pub async fn screenshot_ocr_done(
+    app: tauri::AppHandle,
+    text: String,
+    time_ms: u64,
+) -> Result<(), String> {
+    // Emit to the main window specifically
+    if let Some(main_window) = app.get_webview_window("main") {
+        main_window
+            .emit(
+                "screenshot-ocr-result",
+                serde_json::json!({
+                    "text": text,
+                    "timeMs": time_ms,
+                }),
+            )
+            .map_err(|e| format!("Failed to emit screenshot-ocr-result: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Inner implementation of capture_all_monitors (reusable without tauri::State).
+fn capture_all_monitors_inner() -> Result<serde_json::Value, String> {
+    let monitors =
+        xcap::Monitor::all().map_err(|e| format!("Failed to enumerate monitors: {e}"))?;
+
+    if monitors.is_empty() {
+        return Err("No monitors found".to_string());
+    }
+
+    // Calculate bounding box of all monitors
+    let mut min_x = i32::MAX;
+    let mut min_y = i32::MAX;
+    let mut max_x = i32::MIN;
+    let mut max_y = i32::MIN;
+
+    for m in &monitors {
+        min_x = min_x.min(m.x());
+        min_y = min_y.min(m.y());
+        max_x = max_x.max(m.x() + m.width() as i32);
+        max_y = max_y.max(m.y() + m.height() as i32);
+    }
+
+    let bbox_width = (max_x - min_x) as u32;
+    let bbox_height = (max_y - min_y) as u32;
+
+    // Capture all monitors in parallel
+    let captures: Vec<_> = monitors
+        .iter()
+        .map(|m| {
+            let img = m.capture_image();
+            (m.x(), m.y(), img)
+        })
+        .collect();
+
+    // Stitch images into a single canvas
+    let mut canvas = image::RgbaImage::new(bbox_width, bbox_height);
+
+    for (x, y, cap) in captures {
+        let cap = cap.map_err(|e| format!("Failed to capture monitor: {e}"))?;
+        let offset_x = (x - min_x) as u32;
+        let offset_y = (y - min_y) as u32;
+        image::imageops::overlay(&mut canvas, &cap, offset_x as i64, offset_y as i64);
+    }
+
+    let temp_path = std::env::temp_dir().join("velocitext_screenshot_all.png");
+    canvas
+        .save(&temp_path)
+        .map_err(|e| format!("Failed to save screenshot: {e}"))?;
+
+    Ok(serde_json::json!({
+        "imagePath": temp_path.to_string_lossy(),
+        "width": bbox_width,
+        "height": bbox_height,
+        "boundingBox": {
+            "minX": min_x,
+            "minY": min_y,
+            "maxX": max_x,
+            "maxY": max_y,
+            "width": bbox_width,
+            "height": bbox_height,
+        }
+    }))
 }

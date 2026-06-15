@@ -17,8 +17,7 @@ import { convertFileSrc } from "@tauri-apps/api/core"
 import { open } from "@tauri-apps/plugin-dialog"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
 import { useAppContext } from "@/lib/app-context"
-import type { OcrResult, ModelInfo, AppConfig, ScreenshotCapture } from "@/types"
-import { ScreenshotOverlay } from "@/components/screenshot-overlay"
+import type { OcrResult, ModelInfo } from "@/types"
 
 type OCRState = "idle" | "loading" | "completed" | "error"
 
@@ -29,7 +28,11 @@ const MODEL_DISPLAY: Record<string, string> = {
   "ppocr-v6": "PaddleOCR V6",
 }
 
-export function OCRPage() {
+interface OCRPageProps {
+  onScreenshotTrigger?: () => void
+}
+
+export function OCRPage({ onScreenshotTrigger }: OCRPageProps) {
   const { t } = useAppContext()
   const [ocrState, setOCRState] = useState<OCRState>("idle")
   const [imagePath, setImagePath] = useState<string | null>(null)
@@ -40,8 +43,6 @@ export function OCRPage() {
   const [activeModel, setActiveModel] = useState("ppocr-v5")
   const [installedModels, setInstalledModels] = useState<Set<string>>(new Set())
   const [flashMessage, setFlashMessage] = useState("")
-  const [screenshotShortcut, setScreenshotShortcut] = useState("Ctrl+Shift+O")
-  const [screenshotCapture, setScreenshotCapture] = useState<ScreenshotCapture | null>(null)
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const modelInstalled = installedModels.has(activeModel)
@@ -75,18 +76,36 @@ export function OCRPage() {
           }
         }
         setInstalledModels(installed)
-
-        // Load screenshot shortcut from config
-        const config = await invoke<AppConfig>("get_app_config")
-        if (config.ocrScreenshotShortcut) {
-          setScreenshotShortcut(config.ocrScreenshotShortcut)
-        }
       } catch {
         // ignore
       }
     }
     load()
   }, [])
+
+  // Listen for screenshot OCR results (dispatched from App.tsx via custom DOM event)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { text, timeMs } = (e as CustomEvent).detail
+      if (text) {
+        setResult({
+          textBlocks: [{ text, confidence: 1.0, boxPoints: [] }],
+          totalTimeMs: timeMs,
+        })
+        setImagePath(null)
+        setImageUrl("")
+        setOCRState("completed")
+        showFlash(
+          t("ocr.completedToast", {
+            blocks: 1,
+            time: (timeMs / 1000).toFixed(1),
+          })
+        )
+      }
+    }
+    window.addEventListener("velocitext:screenshot-ocr-result", handler)
+    return () => window.removeEventListener("velocitext:screenshot-ocr-result", handler)
+  }, [showFlash, t])
 
   // Handle file drop events
   useEffect(() => {
@@ -184,7 +203,7 @@ export function OCRPage() {
       showFlash(
         t("ocr.completedToast", {
           blocks: res.textBlocks.length,
-          time: res.totalTimeMs,
+          time: (res.totalTimeMs / 1000).toFixed(1),
         })
       )
     } catch (err) {
@@ -240,77 +259,15 @@ export function OCRPage() {
     }
   }
 
-  // Trigger screenshot capture → show region selection overlay
+  // Trigger screenshot capture → open transparent fullscreen window
   const handleScreenshotOCR = async () => {
     if (!modelInstalled) {
       setError(t("ocr.modelNotInstalled", { model: MODEL_DISPLAY[activeModel] ?? activeModel }))
       return
     }
 
-    try {
-      const { invoke } = await import("@tauri-apps/api/core")
-      const capture = await invoke<ScreenshotCapture>("capture_screenshot")
-      setScreenshotCapture(capture)
-    } catch (err) {
-      setError(String(err))
-    }
+    onScreenshotTrigger?.()
   }
-
-  // Called when user selects a region and OCR completes
-  const handleScreenshotComplete = useCallback(
-    (text: string, timeMs: number) => {
-      setScreenshotCapture(null)
-      if (text) {
-        setResult({
-          textBlocks: [{ text, confidence: 1.0, boxPoints: [] }],
-          totalTimeMs: timeMs,
-        })
-        setImagePath(null)
-        setImageUrl("")
-        setOCRState("completed")
-        showFlash(
-          t("ocr.completedToast", {
-            blocks: 1,
-            time: timeMs,
-          })
-        )
-        showFlash(t("ocr.screenshotDone"))
-      }
-    },
-    [showFlash, t]
-  )
-
-  const handleScreenshotCancel = useCallback(() => {
-    setScreenshotCapture(null)
-  }, [])
-
-  // Keyboard shortcut for screenshot OCR (configurable in settings)
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      const parts = screenshotShortcut.split("+").map((s) => s.trim().toLowerCase())
-      const ctrl = parts.includes("ctrl") || parts.includes("control")
-      const shift = parts.includes("shift")
-      const alt = parts.includes("alt")
-      const meta = parts.includes("meta") || parts.includes("cmd") || parts.includes("command")
-      const key = parts.find(
-        (p) => !["ctrl", "control", "shift", "alt", "meta", "cmd", "command"].includes(p)
-      )
-
-      if (
-        key &&
-        e.key.toLowerCase() === key &&
-        e.ctrlKey === ctrl &&
-        e.shiftKey === shift &&
-        e.altKey === alt &&
-        e.metaKey === meta
-      ) {
-        e.preventDefault()
-        handleScreenshotOCR()
-      }
-    }
-    window.addEventListener("keydown", handler)
-    return () => window.removeEventListener("keydown", handler)
-  }, [activeModel, modelInstalled, screenshotShortcut])
 
   const handleExportTxt = async () => {
     if (!result || !imagePath) return
@@ -329,18 +286,6 @@ export function OCRPage() {
 
   return (
     <div className="px-4 lg:px-6 space-y-4">
-      {/* Screenshot region selection overlay */}
-      {screenshotCapture && (
-        <ScreenshotOverlay
-          imagePath={screenshotCapture.imagePath}
-          width={screenshotCapture.width}
-          height={screenshotCapture.height}
-          modelVersion={activeModel}
-          onComplete={handleScreenshotComplete}
-          onCancel={handleScreenshotCancel}
-        />
-      )}
-
       {/* Toolbar */}
       <div className="flex items-center gap-2 flex-wrap">
         <select

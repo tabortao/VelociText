@@ -201,4 +201,12 @@ export interface ScreenshotCapture {
   imagePath: string;
   width: number;
   height: number;
+  boundingBox: {
+    minX: number;
+    minY: number;
+    maxX: number;
+    maxY: number;
+    width: number;
+    height: number;
+  };
 }

@@ -20,7 +20,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 log = "0.4"
 tauri-plugin-log = "2"
-tauri = { version = "2", features = ["protocol-asset"] }
+tauri = { version = "2", features = ["protocol-asset", "tray-icon"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
@@ -84,6 +84,9 @@ tauri-plugin-clipboard-manager = "2"
 
 # 剪贴板 (used directly for reliable clipboard access)
 arboard = "3"
+
+# 全局快捷键 (screenshot OCR when app is minimized)
+tauri-plugin-global-shortcut = "2"
 
 
 [profile.dev]

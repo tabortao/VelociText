@@ -11,6 +11,7 @@
     "log:default",
     "dialog:default",
     "fs:default",
-    "clipboard-manager:default"
+    "clipboard-manager:default",
+    "global-shortcut:default"
   ]
 }
