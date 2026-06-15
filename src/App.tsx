@@ -20,10 +20,11 @@ import type { AppConfig } from "@/types"
 export type Page = "transcribe" | "dictionary" | "ocr" | "settings" | "model-settings" | "about"
 
 export default function App() {
-  const [currentPage, setCurrentPage] = useState<Page>("transcribe")
+  const [currentPage, setCurrentPage] = useState<Page>("ocr")
   const [sidebarOpen, setSidebarOpen] = useState(true)
-  const [ocrModelVersion, setOcrModelVersion] = useState("ppocr-v5")
+  const ocrModelVersionRef = useRef("ppocr-v5")
   const unlistenRef = useRef<UnlistenFn | null>(null)
+  const toastRef = useRef<HTMLDivElement | null>(null)
 
   // Load sidebar state from config on mount
   useEffect(() => {
@@ -43,7 +44,7 @@ export default function App() {
     const load = async () => {
       try {
         const model = await invoke<string>("ocr_get_active_model")
-        setOcrModelVersion(model)
+        ocrModelVersionRef.current = model
       } catch {
         // ignore
       }
@@ -51,8 +52,50 @@ export default function App() {
     load()
   }, [])
 
+  // Show green toast notification
+  const showGreenToast = useCallback((message: string) => {
+    // Remove existing toast
+    const existing = document.getElementById("velocitext-green-toast")
+    if (existing) existing.remove()
+
+    const toast = document.createElement("div")
+    toast.id = "velocitext-green-toast"
+    toast.textContent = message
+    Object.assign(toast.style, {
+      position: "fixed",
+      top: "18%",
+      left: "50%",
+      transform: "translateX(-50%)",
+      background: "#dcfce7",
+      color: "#166534",
+      padding: "10px 24px",
+      borderRadius: "8px",
+      fontSize: "14px",
+      fontWeight: "500",
+      fontFamily: "system-ui, -apple-system, sans-serif",
+      boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
+      zIndex: "99999",
+      pointerEvents: "none",
+      transition: "opacity 0.3s ease",
+      border: "1px solid #bbf7d0",
+    })
+    document.body.appendChild(toast)
+    toastRef.current = toast
+
+    setTimeout(() => {
+      if (toastRef.current) {
+        toastRef.current.style.opacity = "0"
+        setTimeout(() => {
+          if (toastRef.current) {
+            toastRef.current.remove()
+            toastRef.current = null
+          }
+        }, 300)
+      }
+    }, 2000)
+  }, [])
+
   // Listen for screenshot OCR result events from the main window
-  // (Rust emits this to the main window after the screenshot window completes OCR)
   useEffect(() => {
     let unlistenResult: UnlistenFn | undefined
 
@@ -71,6 +114,10 @@ export default function App() {
               detail: { text, timeMs },
             })
           )
+          // Show green toast
+          if (text) {
+            showGreenToast("文本复制成功")
+          }
         })
       } catch {
         // ignore
@@ -80,6 +127,23 @@ export default function App() {
 
     return () => {
       unlistenResult?.()
+    }
+  }, [showGreenToast])
+
+  // Trigger screenshot: capture + open transparent fullscreen window
+  const triggerScreenshot = useCallback(async () => {
+    try {
+      // Refresh OCR model version
+      try {
+        const model = await invoke<string>("ocr_get_active_model")
+        ocrModelVersionRef.current = model
+      } catch {
+        // keep current
+      }
+
+      await invoke("start_screenshot_selection", { modelVersion: ocrModelVersionRef.current })
+    } catch (err) {
+      console.error("Screenshot capture failed:", err)
     }
   }, [])
 
@@ -111,8 +175,8 @@ export default function App() {
           // might not be registered
         }
 
-        await registerShortcut(shortcut, async (event) => {
-          if (event.state === "Pressed" && !cancelled) {
+        await registerShortcut(shortcut, () => {
+          if (!cancelled) {
             triggerScreenshot()
           }
         })
@@ -131,24 +195,7 @@ export default function App() {
       cancelled = true
       unlistenRef.current?.()
     }
-  }, [])
-
-  // Trigger screenshot: capture + open transparent fullscreen window
-  const triggerScreenshot = useCallback(async () => {
-    try {
-      // Refresh OCR model version
-      try {
-        const model = await invoke<string>("ocr_get_active_model")
-        setOcrModelVersion(model)
-      } catch {
-        // keep current
-      }
-
-      await invoke("start_screenshot_selection", { modelVersion: ocrModelVersion })
-    } catch (err) {
-      console.error("Screenshot capture failed:", err)
-    }
-  }, [ocrModelVersion])
+  }, [triggerScreenshot])
 
   // Persist sidebar state to config
   const handleSidebarOpenChange = useCallback(async (open: boolean) => {
@@ -177,7 +224,7 @@ export default function App() {
       case "about":
         return <AboutPage />
       default:
-        return <TranscribePage />
+        return <OCRPage onScreenshotTrigger={triggerScreenshot} />
     }
   }
 

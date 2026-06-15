@@ -69,8 +69,8 @@ export function AppSidebar({
   }, [])
 
   const mainNav = [
-    { id: "transcribe" as Page, title: l.transcribe, icon: MicIcon },
     { id: "ocr" as Page, title: l.ocr, icon: ScanTextIcon },
+    { id: "transcribe" as Page, title: l.transcribe, icon: MicIcon },
   ]
 
   const settingsNav = [
@@ -88,7 +88,7 @@ export function AppSidebar({
               asChild
               className="data-[slot=sidebar-menu-button]:p-1.5!"
             >
-              <a href="#" onClick={(e) => { e.preventDefault(); onNavigate("transcribe") }}>
+              <a href="#" onClick={(e) => { e.preventDefault(); onNavigate("ocr") }}>
                 <CommandIcon className="size-5!" />
                 <span className="text-base font-semibold">VelociText</span>
               </a>
