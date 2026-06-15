@@ -9,6 +9,7 @@ mod tests;
 
 use config::app_config::AppConfig;
 use config::dictionary_config::DictionaryConfig;
+use engine::ocr::OcrEngine;
 use engine::recognizer_factory::RecognizerFactory;
 use engine::transcriber::Transcriber;
 use engine::transcription_pipeline::{SegmentResult, VadSettings};
@@ -44,6 +45,10 @@ pub struct AppState {
     pub active_model: Arc<Mutex<String>>, // "sense-voice-small" | "paraformer" | "qwen3-asr"
     pub dictionary_config: Arc<Mutex<DictionaryConfig>>,
     pub hotwords_file_path: Arc<Mutex<Option<String>>>,
+    pub active_ocr_model: Arc<Mutex<String>>, // "ppocr-v4" | "ppocr-v5" | "ppocr-v6"
+    /// OCR engine instance (session reuse for performance).
+    /// References snow-shot's OcrService pattern.
+    pub ocr_engine: Arc<Mutex<Option<OcrEngine>>>,
 }
 
 /// Build the ASR recognizer and Silero VAD from the configured model path.
@@ -472,6 +477,8 @@ pub fn run() {
         }
     });
 
+    let active_ocr_model = initial_config.active_ocr_model.clone();
+
     tauri::Builder::default()
         .plugin(
             tauri_plugin_log::Builder::new()
@@ -508,6 +515,8 @@ pub fn run() {
             active_model,
             dictionary_config,
             hotwords_file_path,
+            active_ocr_model: Arc::new(Mutex::new(active_ocr_model)),
+            ocr_engine: Arc::new(Mutex::new(None)),
         })
         .invoke_handler(tauri::generate_handler![
             // 转录命令 (旧)
@@ -515,6 +524,7 @@ pub fn run() {
             commands::transcribe::transcribe_batch,
             commands::transcribe::export_result,
             commands::transcribe::export_to_file,
+            commands::transcribe::write_text_file,
             commands::transcribe::open_file_with_system,
             commands::transcribe::check_ffmpeg,
             commands::transcribe::check_file_format,
@@ -550,6 +560,12 @@ pub fn run() {
             commands::dictionary::save_hotwords,
             commands::dictionary::save_replacements,
             commands::dictionary::get_hotwords_file_path,
+            // OCR 命令
+            commands::ocr::ocr_recognize,
+            commands::ocr::ocr_recognize_bytes,
+            commands::ocr::ocr_get_active_model,
+            commands::ocr::ocr_set_active_model,
+            commands::ocr::ocr_release,
         ])
         .on_page_load(|webview, payload| {
             if webview.label() == "main" && matches!(payload.event(), PageLoadEvent::Finished) {

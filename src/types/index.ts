@@ -178,3 +178,20 @@ export interface DictionaryConfig {
   hotwords: HotwordEntry[];
   replacements: ReplacementEntry[];
 }
+
+// ============================================================================
+// OCR 类型
+// ============================================================================
+
+/** OCR 文本块 */
+export interface OcrTextBlock {
+  text: string;
+  confidence: number;
+  boxPoints: [number, number][]; // 4 个角点坐标
+}
+
+/** OCR 识别结果 */
+export interface OcrResult {
+  textBlocks: OcrTextBlock[];
+  totalTimeMs: number;
+}

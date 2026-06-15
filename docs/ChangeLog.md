@@ -5,6 +5,51 @@ All notable changes to VelociText will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.1.4] - 2026-06-15
+
+### Fixed
+- **PP-OCR garbled recognition output for all models**: `paddle-ocr-rs`'s `read_keys_from_file` (used by `init_models_with_dict`) loads `dict.txt` without the blank token `#` at index 0 or space ` ` at the end, unlike `get_keys()` which reads from model metadata and adds both. This caused CTC decoding index offset of 1, producing completely garbled Chinese text. Added `prepare_ocr_dict()` function that generates a corrected `dict_ocr.txt` cache file with `#` prepended and ` ` appended, matching the PaddleOCR Python runtime behavior (`["blank"] + character_str + [" "]`). The original `dict.txt` is never modified.
+- **PP-OCR V4 incorrect recognition results**: V4 model now also uses external `dict.txt` (PaddleOCR standard `ppocr_keys_v1.txt`, 6623 characters). The model-embedded `character` metadata field was unreliable, causing completely wrong character mappings. All three models (V4/V5/V6) now use external dictionary files.
+- **PP-OCR V5/V6 crash on recognition**: V5 and V6 models use external `dict.txt` for character dictionary instead of the model-embedded `character` metadata field. The `OcrEngine::new_with_memory` and `init_session` methods now check for `dict.txt` in the model directory and use `init_models_with_dict` when available, falling back to the existing metadata-based dictionary loading for compatibility.
+- **OCR export TXT error "missing required key segments"**: the OCR page was calling `export_to_file` (which expects `segments, format, save_path` parameters for transcription) instead of the new `write_text_file` command (which accepts `path, content` parameters). Added a generic `write_text_file` Tauri command.
+- **Model management page removed "ModelScope.cn" download source text**: the i18n translations for `models.desc.management` and `models.downloadHint` no longer reference ModelScope, since models are downloaded from GitCode.
+- **PaddleOCR model download to use correct GitCode path**: download URL changed from `releases/download/ocr/` to `releases/download/model/` to match the actual GitCode release layout.
+- **OCR page allowing uninstalled models**: the OCR page now tracks which models are actually installed and shows an amber warning banner when an uninstalled model is selected. Selecting a model without installation no longer triggers OCR recognition (previously it would try and fail silently or produce confusing errors).
+- **Missing `detection.onnx` in ppocr-v4.zip and ppocr-v5.zip**: rebuilt both model archives to include the required `detection.onnx` file (from `ch_PP-OCRv4_det_infer.onnx`). Previously the zips only contained `recognition.onnx` and `cls.onnx`, so `is_ppocr_installed_at` would never detect them as installed even after extraction.
+- **PaddleOCR model download HTTP status check**: `download_file` now validates HTTP response status codes (2xx required) before writing the response body. Previously, a 404 Not Found response from the server was silently written as a corrupted zip file, causing confusing "Read zip archive failed" errors.
+
+### Changed
+- **OCR engine session reuse for ~10x faster subsequent calls**: the ONNX session is now kept alive in `AppState` (references snow-shot's `OcrService` pattern). First OCR call initializes the engine (~1-2s), subsequent calls reuse the cached session (~100-300ms). Model switching releases the old engine and creates a new one. Added `ocr_release` command for explicit resource management.
+- **Model settings page redesigned with dropdown selection**: ASR and OCR models are now selected via dropdown menus instead of individual cards. Each dropdown shows model installation status and provides context-aware action buttons (Download / Switch & Restart / Active badge). The layout is cleaner and more compact.
+- **PP-OCR V4/V5/V6 model archives now include `dict.txt`**: the zip files for all three models include character dictionary files. V4 uses PaddleOCR standard `ppocr_keys_v1.txt` (6623 chars), V5/V6 dictionaries sourced from [OnnxOCR](https://github.com/jingsongliujing/OnnxOCR). The model downloader also extracts `dict.txt` alongside the ONNX model files.
+- **`zip` crate upgraded from 0.6 to 2.x**: with `deflate` and `xz` features to support xz-compressed zip archives (e.g., snow-shot's `rapid_ocr.zip` using method 95). No breaking API changes since only `ZipArchive::new` was used for reading.
+
+### Added
+- **PP-OCRv6 ONNX model downloader script** (`tools/download_ppocr_v6.py`): Python script to download pre-converted PP-OCRv6 ONNX models directly from ModelScope (魔搭社区, `https://www.modelscope.cn/collections/PaddlePaddle/PP-OCRv6`). Downloads `PP-OCRv6_small_det_onnx` (detection, 9.4MB) and `PP-OCRv6_small_rec_onnx` (recognition, 20.2MB) from official PaddlePaddle ModelScope repositories. Classification model (`cls.onnx`) reused from PP-OCRv4/V5. Note: the `inference.yml` file shipped alongside the ModelScope ONNX model is not needed by `paddle-ocr-rs` (it uses its own built-in preprocessing config).
+
+## [v0.1.3] - 2026-06-14
+
+### Added
+- **OCR page**: Optical Character Recognition using ONNX-format PaddleOCR models (V4/V5/V6)
+  - Drag-and-drop or file picker to load images (PNG, JPG, JPEG, BMP, WEBP, TIFF)
+  - Model version selector (V4/V5/V6) with runtime switching (no restart required)
+  - Image preview with OCR results panel showing extracted text and confidence scores
+  - Copy all text to clipboard or export as TXT file
+  - `paddle-ocr-rs` crate for PaddleOCR ONNX inference via ONNX Runtime (`ort`)
+  - OCR models (detection.onnx + recognition.onnx + cls.onnx) downloadable from Model Settings page
+  - Full i18n support (Chinese and English) for all OCR UI strings
+- **OCR engine improvements** (referencing [snow-shot](https://github.com/mg-chao/snow-shot)):
+  - `detect_angle_rollback` with 0.9 rollback threshold to reduce false angle corrections on screenshots
+  - Parallel RGBA→RGB conversion via `rayon` for faster screenshot processing
+  - Model in-memory loading (`new_with_memory`) for faster initialization
+  - Scale factor handling with Lanczos3 resizing for low-resolution images
+  - Session lifecycle management (`release_session`/`init_session`) to free ONNX Runtime resources
+  - `ocr_recognize_bytes` Tauri command for direct byte-array OCR (no temp file needed)
+- **OCR model management**: PaddleOCR V4/V5/V6 entries in Model Settings page
+  - Download from gitcode.com (`https://gitcode.com/tabortao/VelociText/releases/download/model/ppocr-v*.zip`)
+  - Install status tracking and download progress
+  - Active OCR model persisted in `AppConfig.activeOcrModel`
+
 ## [v0.1.2] - 2026-06-11
 
 ### Added

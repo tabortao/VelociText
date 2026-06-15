@@ -8,3 +8,4 @@ pub mod export;
 pub mod progress;
 pub mod transcription_pipeline;
 pub mod vad;
+pub mod ocr;

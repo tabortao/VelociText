@@ -28,7 +28,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # 语音识别
-sherpa-onnx = "1.13"
+sherpa-onnx = { version = "1.13", default-features = false, features = ["shared"] }
 
 # 纯 Rust 音频解码（替代 FFmpeg 提取）
 # 只启用音频 codec，禁用视频 codec，确保视频文件正确选择音频轨
@@ -53,8 +53,8 @@ tokio = { version = "1", features = ["full"] }
 # 文件处理
 tempfile = "3"
 
-# 解压 zip 模型包
-zip = "0.6"
+# 解压 zip 模型包 (supports deflate + xz compression)
+zip = { version = "2", features = ["deflate", "xz"] }
 
 # 错误处理
 anyhow = "1"
@@ -68,6 +68,15 @@ ureq = { version = "2", features = ["tls"] }
 
 # 7z 解压 (FFmpeg 下载)
 sevenz-rust = "0.6"
+
+# OCR (PaddleOCR via ONNX Runtime)
+# paddle-ocr-rs 0.6.1 is incompatible with ort >= 2.0.0-rc.11 due to API changes
+# Pin ort to rc.10 which is the version paddle-ocr-rs was built against
+paddle-ocr-rs = "0.6"
+ort = { version = "=2.0.0-rc.10", default-features = false }
+num_cpus = "1.17"
+image = "0.25"
+rayon = "1.10"
 
 
 [profile.dev]

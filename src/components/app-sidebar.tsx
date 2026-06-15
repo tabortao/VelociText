@@ -14,6 +14,7 @@ import {
 import {
   MicIcon,
   BookOpenIcon,
+  ScanTextIcon,
   Settings2Icon,
   CpuIcon,
   InfoIcon,
@@ -36,6 +37,7 @@ const labels = {
     features: "功能",
     transcribe: "转录",
     dictionary: "词典",
+    ocr: "OCR",
     settingsLabel: "设置",
     settings: "设置",
     models: "模型管理",
@@ -45,6 +47,7 @@ const labels = {
     features: "Features",
     transcribe: "Transcribe",
     dictionary: "Dictionary",
+    ocr: "OCR",
     settingsLabel: "Settings",
     settings: "Settings",
     models: "Models",
@@ -68,6 +71,7 @@ export function AppSidebar({
   const mainNav = [
     { id: "transcribe" as Page, title: l.transcribe, icon: MicIcon },
     { id: "dictionary" as Page, title: l.dictionary, icon: BookOpenIcon },
+    { id: "ocr" as Page, title: l.ocr, icon: ScanTextIcon },
   ]
 
   const settingsNav = [

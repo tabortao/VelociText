@@ -3,9 +3,13 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
+import { Badge } from "@/components/ui/badge"
 import { CpuIcon, DownloadIcon, CheckCircleIcon, FolderOpenIcon, ZapIcon } from "lucide-react"
 import { useAppContext } from "@/lib/app-context"
 import type { AppConfig, ModelInfo, DownloadProgress } from "@/types"
+
+const ASR_MODELS = ["sense-voice-small", "paraformer", "qwen3-asr"] as const
+const OCR_MODELS = ["ppocr-v4", "ppocr-v5", "ppocr-v6"] as const
 
 export function ModelSettingsPage() {
   const { t } = useAppContext()
@@ -16,6 +20,11 @@ export function ModelSettingsPage() {
   const [downloadError, setDownloadError] = useState<string | null>(null)
   const [activeModel, setActiveModel] = useState<string>("")
   const [switching, setSwitching] = useState(false)
+  const [selectedAsr, setSelectedAsr] = useState<string>("sense-voice-small")
+  const [selectedOcr, setSelectedOcr] = useState<string>("ppocr-v5")
+
+  const getModel = (name: string) => models.find((m) => m.name === name)
+  const isInstalled = (name: string) => getModel(name)?.installed ?? false
 
   const loadConfig = async () => {
     try {
@@ -42,6 +51,7 @@ export function ModelSettingsPage() {
       const { invoke } = await import("@tauri-apps/api/core")
       const active = await invoke<string>("get_active_model")
       setActiveModel(active)
+      setSelectedAsr(active)
     } catch {
       // ignore
     }
@@ -103,24 +113,12 @@ export function ModelSettingsPage() {
     setSwitching(true)
     try {
       const { invoke } = await import("@tauri-apps/api/core")
-      // This saves config and restarts the app
       await invoke<string>("set_active_model", { modelName })
     } catch (err) {
       console.error("Failed to switch model:", err)
       setSwitching(false)
     }
-    // No finally: app will restart, switching stays true
   }
-
-  const modelDescriptions: Record<string, string> = {
-    "sense-voice-small": t("models.senseVoiceDesc"),
-    "paraformer": t("models.paraformerDesc"),
-    "qwen3-asr": t("models.qwen3AsrDesc"),
-    "silero-vad": t("models.sileroVadDesc"),
-  }
-
-  // ASR models that can be switched
-  const asrModels = ["sense-voice-small", "paraformer", "qwen3-asr"]
 
   return (
     <div className="px-4 lg:px-6 space-y-4">
@@ -148,109 +146,142 @@ export function ModelSettingsPage() {
         </CardContent>
       </Card>
 
-      {/* Model download & management */}
+      {/* ASR Models */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <CpuIcon className="size-5" />
             {t("models.title.management")}
           </CardTitle>
-          <CardDescription>
-            {t("models.desc.management")}
-          </CardDescription>
+          <CardDescription>{t("models.desc.management")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {models.map((model) => {
-            const isInstalled = model.installed
-            const desc = modelDescriptions[model.name] || `~${model.size}`
-            const isActive = model.name === activeModel
-            const isAsrModel = asrModels.includes(model.name)
-            const isDownloading = downloading === model.name
+          {/* ASR Model Selection */}
+          <div className="space-y-3">
+            <h4 className="text-sm font-medium text-muted-foreground">ASR</h4>
+            <div className="flex items-center gap-3">
+              <select
+                value={selectedAsr}
+                onChange={(e) => setSelectedAsr(e.target.value)}
+                className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm flex-1"
+              >
+                {ASR_MODELS.map((key) => {
+                  const model = getModel(key)
+                  return (
+                    <option key={key} value={key}>
+                      {model?.displayName ?? key}{isInstalled(key) ? " ✓" : " (not installed)"}
+                    </option>
+                  )
+                })}
+              </select>
 
-            return (
-              <div key={model.name} className={`p-4 border rounded-lg ${isActive ? "border-primary/50 bg-primary/5" : ""}`}>
-                <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className={`p-2 rounded-full ${isActive ? "bg-primary/20" : isInstalled ? "bg-green-100 dark:bg-green-900" : "bg-muted"}`}>
-                    {isActive ? (
-                      <ZapIcon className="size-5 text-primary" />
-                    ) : isInstalled ? (
-                      <CheckCircleIcon className="size-5 text-green-600 dark:text-green-400" />
-                    ) : (
-                      <CpuIcon className="size-5 text-muted-foreground" />
-                    )}
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <p className="font-medium">{model.displayName}</p>
-                      {isActive && (
-                        <span className="text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">
-                          {t("models.activeModel")}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-sm text-muted-foreground">{desc}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {isInstalled ? (
-                    isAsrModel && !isActive ? (
-                      <Button
-                        onClick={() => handleSwitchModel(model.name)}
-                        disabled={switching}
-                        variant="outline"
-                        size="sm"
-                      >
-                        {switching ? t("models.switching") : t("models.switchModel")}
-                      </Button>
-                    ) : (
-                      <span className="text-sm text-green-600 dark:text-green-400 font-medium">
-                        {t("models.installed")}
-                      </span>
-                    )
-                  ) : (
+              {(() => {
+                const selectedModel = getModel(selectedAsr)
+                if (!selectedModel) return null
+
+                if (!selectedModel.installed) {
+                  return (
                     <Button
-                      onClick={() => handleDownload(model.name)}
+                      onClick={() => handleDownload(selectedAsr)}
                       disabled={downloading !== null}
                       size="sm"
                     >
                       <DownloadIcon className="size-4 mr-1" />
-                      {isDownloading ? t("models.downloading") : t("models.download")}
+                      {downloading === selectedAsr ? t("models.downloading") : t("models.download")}
                     </Button>
-                  )}
-                </div>
-                </div>
-                {model.name === "paraformer" && !isInstalled && (
-                  <div className="mt-2 text-xs text-muted-foreground border-t pt-2">
-                    <a
-                      href="https://gitcode.com/tabortao/VelociText/releases/v0.1.2/paraformer.zip"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline hover:text-foreground"
+                  )
+                }
+
+                if (selectedAsr === activeModel) {
+                  return (
+                    <Badge variant="default" className="h-8 px-3">
+                      <ZapIcon className="size-3 mr-1" />
+                      {t("models.activeModel")}
+                    </Badge>
+                  )
+                }
+
+                return (
+                  <Button
+                    onClick={() => handleSwitchModel(selectedAsr)}
+                    disabled={switching}
+                    variant="outline"
+                    size="sm"
+                  >
+                    {switching ? t("models.switching") : t("models.switchModel")}
+                  </Button>
+                )
+              })()}
+            </div>
+            {(() => {
+              const sm = getModel(selectedAsr)
+              if (sm && sm.installed && sm.path) {
+                return (
+                  <p className="text-xs text-muted-foreground">
+                    {sm.path}
+                  </p>
+                )
+              }
+              return null
+            })()}
+          </div>
+
+          {/* OCR Model Selection */}
+          <div className="space-y-3 pt-3 border-t">
+            <h4 className="text-sm font-medium text-muted-foreground">OCR</h4>
+            <div className="flex items-center gap-3">
+              <select
+                value={selectedOcr}
+                onChange={(e) => setSelectedOcr(e.target.value)}
+                className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm flex-1"
+              >
+                {OCR_MODELS.map((key) => {
+                  const model = getModel(key)
+                  return (
+                    <option key={key} value={key}>
+                      {model?.displayName ?? key}{isInstalled(key) ? " ✓" : " (not installed)"}
+                    </option>
+                  )
+                })}
+              </select>
+
+              {(() => {
+                const selectedModel = getModel(selectedOcr)
+                if (!selectedModel) return null
+
+                if (!selectedModel.installed) {
+                  return (
+                    <Button
+                      onClick={() => handleDownload(selectedOcr)}
+                      disabled={downloading !== null}
+                      size="sm"
                     >
-                      {t("models.manualDownload")}
-                    </a>
-                    <span className="mx-1">·</span>
-                    <span>{t("models.manualHint")}</span>
-                  </div>
-                )}
-                {model.name === "qwen3-asr" && !isInstalled && (
-                  <div className="mt-2 text-xs text-muted-foreground border-t pt-2">
-                    <a
-                      href="https://gitcode.com/tabortao/VelociText/releases/download/model/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.zip"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline hover:text-foreground"
-                    >
-                      {t("models.manualDownload")}
-                    </a>
-                    <span className="mx-1">·</span>
-                    <span>{t("models.manualHint")}</span>
-                  </div>
-                )}
-              </div>
-            )
-          })}
+                      <DownloadIcon className="size-4 mr-1" />
+                      {downloading === selectedOcr ? t("models.downloading") : t("models.download")}
+                    </Button>
+                  )
+                }
+
+                return (
+                  <Badge variant="outline" className="h-8 px-3 gap-1 border-green-300 dark:border-green-700">
+                    <CheckCircleIcon className="size-3 text-green-600 dark:text-green-400" />
+                    <span className="text-green-700 dark:text-green-300">{t("models.installed")}</span>
+                  </Badge>
+                )
+              })()}
+            </div>
+            {(() => {
+              const sm = getModel(selectedOcr)
+              if (sm && sm.installed && sm.path) {
+                return (
+                  <p className="text-xs text-muted-foreground">
+                    {sm.path}
+                  </p>
+                )
+              }
+              return null
+            })()}
+          </div>
 
           {/* Download progress */}
           {downloading && downloadProgress && (
@@ -280,7 +311,7 @@ export function ModelSettingsPage() {
           )}
 
           {/* Hint */}
-          {!models.some((m) => m.installed && asrModels.includes(m.name)) && !downloading && (
+          {!models.some((m) => m.installed && ASR_MODELS.includes(m.name as typeof ASR_MODELS[number])) && !downloading && (
             <div className="text-sm text-muted-foreground py-2">
               {t("models.downloadHint")}
             </div>

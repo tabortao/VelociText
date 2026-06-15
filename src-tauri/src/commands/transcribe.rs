@@ -281,6 +281,12 @@ pub async fn export_to_file(
     std::fs::write(&save_path, content).map_err(|e| format!("Failed to write file: {}", e))
 }
 
+/// Generic text file writer (used by OCR export, etc.)
+#[tauri::command]
+pub async fn write_text_file(path: String, content: String) -> Result<(), String> {
+    std::fs::write(&path, content).map_err(|e| format!("Failed to write file: {}", e))
+}
+
 /// Open a file with the system's default application
 #[tauri::command]
 pub async fn open_file_with_system(path: String) -> Result<(), String> {

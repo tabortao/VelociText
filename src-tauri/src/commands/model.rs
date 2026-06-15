@@ -1,4 +1,4 @@
-use crate::engine::model_manager::{is_model_installed_at, is_paraformer_installed_at, is_qwen3_asr_installed_at, is_silero_vad_installed_at, ModelInfo, ModelManager};
+use crate::engine::model_manager::{is_model_installed_at, is_paraformer_installed_at, is_qwen3_asr_installed_at, is_silero_vad_installed_at, is_ppocr_installed_at, ModelInfo, ModelManager};
 use crate::AppState;
 use std::path::Path;
 use tauri::Emitter;
@@ -199,6 +199,15 @@ pub async fn download_specific_model(
                     return Ok("Model already installed".into());
                 }
                 manager.download_qwen3_asr(&|progress| {
+                    let _ = app_handle_clone.emit("model-download-progress", progress.clone());
+                }).map_err(|e| e.to_string())?;
+            }
+            "ppocr-v4" | "ppocr-v5" | "ppocr-v6" => {
+                let dir = Path::new(&model_path).join(&model_name);
+                if is_ppocr_installed_at(&dir) {
+                    return Ok("Model already installed".into());
+                }
+                manager.download_ppocr(&model_name, &|progress| {
                     let _ = app_handle_clone.emit("model-download-progress", progress.clone());
                 }).map_err(|e| e.to_string())?;
             }

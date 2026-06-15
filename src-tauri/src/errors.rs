@@ -32,6 +32,9 @@ pub enum AppError {
 
     #[error("序列化错误: {0}")]
     Serde(#[from] serde_json::Error),
+
+    #[error("OCR 错误: {0}")]
+    Ocr(String),
 }
 
 pub type AppResult<T> = Result<T, AppError>;

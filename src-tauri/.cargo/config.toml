@@ -1,0 +1,2 @@
+# With sherpa-onnx using shared feature (DLL), each DLL carries its own CRT.
+# No need to force crt-static; default dynamic CRT (/MD) works for all crates.

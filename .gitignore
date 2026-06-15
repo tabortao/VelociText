@@ -24,3 +24,10 @@ dist-ssr
 *.sw?
 docs/*.mp3
 /docs/Reference/
+/tools/ppocr-v4/
+/tools/ppocr-v5/
+/tools/ppocr-v6/
+/tools/ppocr-v6.zip
+/tools/.model_cache/
+/docs/ocr_dict/
+/docs/ocr-models/
