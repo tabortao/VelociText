@@ -23,7 +23,6 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState<Page>("ocr")
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const ocrModelVersionRef = useRef("ppocr-v5")
-  const unlistenRef = useRef<UnlistenFn | null>(null)
   const toastRef = useRef<HTMLDivElement | null>(null)
 
   // Load sidebar state from config on mount
@@ -54,7 +53,6 @@ export default function App() {
 
   // Show green toast notification
   const showGreenToast = useCallback((message: string) => {
-    // Remove existing toast
     const existing = document.getElementById("velocitext-green-toast")
     if (existing) existing.remove()
 
@@ -95,41 +93,6 @@ export default function App() {
     }, 2000)
   }, [])
 
-  // Listen for screenshot OCR result events from the main window
-  useEffect(() => {
-    let unlistenResult: UnlistenFn | undefined
-
-    const setup = async () => {
-      try {
-        unlistenResult = await listen<{
-          text: string
-          timeMs: number
-        }>("screenshot-ocr-result", (event) => {
-          const { text, timeMs } = event.payload
-          // Navigate to OCR page to show results
-          setCurrentPage("ocr")
-          // The OCR page will receive the result via a custom event
-          window.dispatchEvent(
-            new CustomEvent("velocitext:screenshot-ocr-result", {
-              detail: { text, timeMs },
-            })
-          )
-          // Show green toast
-          if (text) {
-            showGreenToast("文本复制成功")
-          }
-        })
-      } catch {
-        // ignore
-      }
-    }
-    setup()
-
-    return () => {
-      unlistenResult?.()
-    }
-  }, [showGreenToast])
-
   // Trigger screenshot: capture + open transparent fullscreen window
   const triggerScreenshot = useCallback(async () => {
     try {
@@ -147,55 +110,45 @@ export default function App() {
     }
   }, [])
 
-  // Register global shortcut for screenshot OCR
+  // Listen for screenshot OCR result events from the main window
   useEffect(() => {
-    let cancelled = false
+    let unlistenResult: UnlistenFn | undefined
+    let unlistenTrigger: UnlistenFn | undefined
 
-    const register = async () => {
+    const setup = async () => {
       try {
-        const { register: registerShortcut, unregister } = await import(
-          "@tauri-apps/plugin-global-shortcut"
-        )
-
-        // Load the configured shortcut from config
-        let shortcut = "Ctrl+Shift+O"
-        try {
-          const config = await invoke<AppConfig>("get_app_config")
-          if (config.ocrScreenshotShortcut) {
-            shortcut = config.ocrScreenshotShortcut
-          }
-        } catch {
-          // use default
-        }
-
-        // Unregister any previous shortcut
-        try {
-          await unregister(shortcut)
-        } catch {
-          // might not be registered
-        }
-
-        await registerShortcut(shortcut, () => {
-          if (!cancelled) {
-            triggerScreenshot()
+        // Listen for OCR results from screenshot window
+        unlistenResult = await listen<{
+          text: string
+          timeMs: number
+        }>("screenshot-ocr-result", (event) => {
+          const { text, timeMs } = event.payload
+          setCurrentPage("ocr")
+          window.dispatchEvent(
+            new CustomEvent("velocitext:screenshot-ocr-result", {
+              detail: { text, timeMs },
+            })
+          )
+          if (text) {
+            showGreenToast("文本复制成功")
           }
         })
 
-        unlistenRef.current = () => {
-          unregister(shortcut).catch(() => {})
-        }
-      } catch (err) {
-        console.error("Failed to register global shortcut:", err)
+        // Listen for trigger from Rust-side global shortcut
+        unlistenTrigger = await listen("trigger-screenshot-ocr", () => {
+          triggerScreenshot()
+        })
+      } catch {
+        // ignore
       }
     }
-
-    register()
+    setup()
 
     return () => {
-      cancelled = true
-      unlistenRef.current?.()
+      unlistenResult?.()
+      unlistenTrigger?.()
     }
-  }, [triggerScreenshot])
+  }, [showGreenToast, triggerScreenshot])
 
   // Persist sidebar state to config
   const handleSidebarOpenChange = useCallback(async (open: boolean) => {

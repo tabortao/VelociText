@@ -24,6 +24,7 @@ use tauri::tray::{TrayIconBuilder, MouseButton, MouseButtonState, TrayIconEvent}
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri_plugin_log::{Target, TargetKind};
 use tauri_plugin_opener::OpenerExt;
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 pub struct AppState {
     pub config: Mutex<AppConfig>,
@@ -374,6 +375,48 @@ fn create_silero_vad_with_settings(
         .ok_or_else(|| format!("Failed to create VAD from {model_path}"))
 }
 
+/// Parse a shortcut string like "Ctrl+Shift+O" into (Modifiers, Code).
+fn parse_shortcut_string(s: &str) -> (Modifiers, Code) {
+    let parts: Vec<&str> = s.split('+').map(|p| p.trim()).collect();
+    let mut modifiers = Modifiers::empty();
+
+    for &part in &parts[..parts.len().saturating_sub(1)] {
+        match part.to_lowercase().as_str() {
+            "ctrl" | "control" => modifiers |= Modifiers::CONTROL,
+            "shift" => modifiers |= Modifiers::SHIFT,
+            "alt" => modifiers |= Modifiers::ALT,
+            "super" | "cmd" | "command" | "win" => modifiers |= Modifiers::SUPER,
+            _ => {}
+        }
+    }
+
+    let key = parts.last().map(|p| p.to_uppercase()).unwrap_or_default();
+    let code = match key.as_str() {
+        "A" => Code::KeyA, "B" => Code::KeyB, "C" => Code::KeyC, "D" => Code::KeyD,
+        "E" => Code::KeyE, "F" => Code::KeyF, "G" => Code::KeyG, "H" => Code::KeyH,
+        "I" => Code::KeyI, "J" => Code::KeyJ, "K" => Code::KeyK, "L" => Code::KeyL,
+        "M" => Code::KeyM, "N" => Code::KeyN, "O" => Code::KeyO, "P" => Code::KeyP,
+        "Q" => Code::KeyQ, "R" => Code::KeyR, "S" => Code::KeyS, "T" => Code::KeyT,
+        "U" => Code::KeyU, "V" => Code::KeyV, "W" => Code::KeyW, "X" => Code::KeyX,
+        "Y" => Code::KeyY, "Z" => Code::KeyZ,
+        "0" => Code::Digit0, "1" => Code::Digit1, "2" => Code::Digit2,
+        "3" => Code::Digit3, "4" => Code::Digit4, "5" => Code::Digit5,
+        "6" => Code::Digit6, "7" => Code::Digit7, "8" => Code::Digit8,
+        "9" => Code::Digit9,
+        "F1" => Code::F1, "F2" => Code::F2, "F3" => Code::F3, "F4" => Code::F4,
+        "F5" => Code::F5, "F6" => Code::F6, "F7" => Code::F7, "F8" => Code::F8,
+        "F9" => Code::F9, "F10" => Code::F10, "F11" => Code::F11, "F12" => Code::F12,
+        "SPACE" => Code::Space,
+        "TAB" => Code::Tab,
+        "ENTER" | "RETURN" => Code::Enter,
+        "ESCAPE" | "ESC" => Code::Escape,
+        "BACKSPACE" => Code::Backspace,
+        _ => Code::KeyO, // fallback
+    };
+
+    (modifiers, code)
+}
+
 fn external_navigation_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::<R>::new("external-navigation")
         .on_navigation(|webview, url| {
@@ -565,6 +608,12 @@ pub fn run() {
     });
 
     let active_ocr_model = initial_config.active_ocr_model.clone();
+    // Extract shortcut before initial_config is moved into AppState
+    let screenshot_shortcut = if initial_config.ocr_screenshot_shortcut.is_empty() {
+        "Ctrl+Shift+O".to_string()
+    } else {
+        initial_config.ocr_screenshot_shortcut.clone()
+    };
 
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -581,6 +630,14 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            // When a second instance is launched, show and focus the main window
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+                let _ = window.unminimize();
+            }
+        }))
         .plugin(external_navigation_plugin())
         .manage(AppState {
             config: Mutex::new(initial_config),
@@ -664,7 +721,7 @@ pub fn run() {
             commands::ocr::ocr_set_active_model,
             commands::ocr::ocr_release,
         ])
-        .setup(|app| {
+        .setup(move |app| {
             // System tray — references snow-shot's tray implementation
             let show = MenuItemBuilder::with_id("show", "显示 VelociText")
                 .build(app)?;
@@ -707,6 +764,35 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+
+            // Register global shortcut for screenshot OCR (Rust-side, more reliable than JS)
+            {
+                let app_handle = app.handle().clone();
+
+                // Parse shortcut string (e.g. "Ctrl+Shift+O") into Modifiers + Code
+                let (modifiers, code) = parse_shortcut_string(&screenshot_shortcut);
+
+                let shortcut = Shortcut::new(Some(modifiers), code);
+
+                // Register with handler
+                app.global_shortcut().on_shortcut(shortcut, move |_app, _shortcut, event| {
+                    if event.state() == ShortcutState::Pressed {
+                        log::info!("[global-shortcut] screenshot OCR shortcut pressed");
+                        // Trigger screenshot via invoke
+                        let app = app_handle.clone();
+                        tauri::async_runtime::spawn(async move {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                            // Emit event to frontend to trigger screenshot
+                            let _ = app.emit("trigger-screenshot-ocr", ());
+                        });
+                    }
+                })?;
+
+                log::info!("[global-shortcut] registered shortcut: {}", screenshot_shortcut);
+            }
 
             Ok(())
         })
