@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [v0.1.4] - 2026-06-15
 
+### Changed
+- **ASR model lazy loading**: ASR models (SenseVoice-Small, Paraformer-Large, Qwen3-ASR) are no longer loaded at application startup. Instead, they are loaded on demand when the user navigates to the Transcribe page via the new `ensure_asr_models` command. This reduces startup memory usage from ~500MB to ~50MB. After the user leaves the Transcribe page, a 5-minute inactivity timer starts; if the user does not return within 5 minutes, the ASR models are released from memory via the `release_asr_models` command. Returning to the Transcribe page cancels the timer and reloads models if needed. The `init_status` field now supports value `3` (released) in addition to `0` (pending), `1` (ready), and `2` (error).
+
 ### Fixed
 - **PP-OCR garbled recognition output for all models**: `paddle-ocr-rs`'s `read_keys_from_file` (used by `init_models_with_dict`) loads `dict.txt` without the blank token `#` at index 0 or space ` ` at the end, unlike `get_keys()` which reads from model metadata and adds both. This caused CTC decoding index offset of 1, producing completely garbled Chinese text. Added `prepare_ocr_dict()` function that generates a corrected `dict_ocr.txt` cache file with `#` prepended and ` ` appended, matching the PaddleOCR Python runtime behavior (`["blank"] + character_str + [" "]`). The original `dict.txt` is never modified.
 - **PP-OCR V4 incorrect recognition results**: V4 model now also uses external `dict.txt` (PaddleOCR standard `ppocr_keys_v1.txt`, 6623 characters). The model-embedded `character` metadata field was unreliable, causing completely wrong character mappings. All three models (V4/V5/V6) now use external dictionary files.

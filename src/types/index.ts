@@ -144,9 +144,16 @@ export interface ProcessingState {
 
 /** 模型初始化状态 */
 export interface InitStatus {
-  status: number; // 0=pending, 1=ready, 2=error
+  status: number; // 0=pending, 1=ready, 2=error, 3=released
   error: string;
   numThreads: number;
+}
+
+// Global window extension for ASR model release timer
+declare global {
+  interface Window {
+    __velocitext_release_timer?: ReturnType<typeof setTimeout>;
+  }
 }
 
 /** VAD 可调参数 */

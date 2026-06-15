@@ -16,7 +16,7 @@ use engine::transcription_pipeline::{SegmentResult, VadSettings};
 use sherpa_onnx::OfflineRecognizer;
 use std::io::Write;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8};
 use std::sync::{Arc, Mutex};
 use tauri::webview::PageLoadEvent;
 use tauri::{Emitter, Manager, WindowEvent};
@@ -508,104 +508,17 @@ pub fn run() {
     };
     let recognizer = Arc::new(Mutex::new(None::<OfflineRecognizer>));
     let vad_detector = Arc::new(Mutex::new(None::<sherpa_onnx::VoiceActivityDetector>));
-    let init_status = Arc::new(AtomicU8::new(0)); // 0 = pending
+    let init_status = Arc::new(AtomicU8::new(3)); // 3 = released (lazy loading, not loaded yet)
     let init_error = Arc::new(Mutex::new(String::new()));
     let num_threads = Arc::new(AtomicU32::new(0));
     let vad_settings = Arc::new(Mutex::new(VadSettings::default()));
     let active_model: Arc<Mutex<String>> =
         Arc::new(Mutex::new(initial_config.active_model.clone()));
 
-    // Clone Arc handles for the init thread
-    let init_recognizer = Arc::clone(&recognizer);
-    let init_vad = Arc::clone(&vad_detector);
-    let init_status_clone = Arc::clone(&init_status);
-    let init_error_clone = Arc::clone(&init_error);
-    let init_num_threads = Arc::clone(&num_threads);
-    let init_vad_settings = Arc::clone(&vad_settings);
-    let init_model_path = initial_config.model_path.clone();
-    let init_active_model_arc = Arc::clone(&active_model);
-    let init_active_model = initial_config.active_model.clone();
-    let init_hotwords_file_path = hotwords_file_path.lock().unwrap().clone();
-    let _init_dictionary_config = Arc::clone(&dictionary_config);
-
-    // Background thread: load models
-    std::thread::spawn(move || {
-        log::info!("[init] starting model initialization...");
-        let settings = init_vad_settings.lock().unwrap().clone();
-        let preferred = if init_active_model.is_empty() {
-            None
-        } else {
-            Some(init_active_model.as_str())
-        };
-
-        // Write crash marker before loading model
-        let marker_path = std::path::Path::new(&init_model_path).join(".model_loading");
-        if let Some(parent) = marker_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let _ = std::fs::write(&marker_path, &init_active_model);
-
-        match build_models(
-            &init_model_path,
-            &settings,
-            preferred,
-            init_hotwords_file_path,
-        ) {
-            Ok((rec, vad, threads, model_name)) => {
-                // Model loaded successfully — remove crash marker
-                let _ = std::fs::remove_file(&marker_path);
-
-                log::info!("[init] models ready, num_threads={threads}, active_model={model_name}");
-                let r_ok = init_recognizer
-                    .lock()
-                    .map(|mut r| {
-                        *r = Some(rec);
-                    })
-                    .is_ok();
-                let v_ok = init_vad
-                    .lock()
-                    .map(|mut v| {
-                        *v = Some(vad);
-                    })
-                    .is_ok();
-                if r_ok && v_ok {
-                    init_num_threads.store(threads, Ordering::Relaxed);
-                    // Update active_model if it differs from config (e.g., fallback occurred)
-                    if let Ok(mut a) = init_active_model_arc.lock() {
-                        *a = model_name.clone();
-                    }
-                    // Persist the actual model to config file
-                    let mut cfg = AppConfig::load();
-                    if cfg.active_model != model_name {
-                        log::info!(
-                            "[init] updating active_model from {} to {}",
-                            cfg.active_model,
-                            model_name
-                        );
-                        cfg.active_model = model_name;
-                        let _ = AppConfig::save(&cfg);
-                    }
-                    init_status_clone.store(1, Ordering::Relaxed); // 1 = ready
-                } else {
-                    log::error!("[init] mutex poisoned, marking as error");
-                    if let Ok(mut err) = init_error_clone.lock() {
-                        *err = "Internal error: mutex poisoned".to_string();
-                    }
-                    init_status_clone.store(2, Ordering::Relaxed); // 2 = error
-                }
-            }
-            Err(e) => {
-                // Model load failed (caught by catch_unwind) — remove crash marker
-                let _ = std::fs::remove_file(&marker_path);
-
-                log::error!("[init] model initialization failed: {e}");
-                if let Ok(mut err) = init_error_clone.lock() {
-                    *err = e;
-                }
-                init_status_clone.store(2, Ordering::Relaxed);
-            }
-        }
-    });
+    // ASR models are now lazy-loaded via `ensure_asr_models` command
+    // when the user navigates to the Transcribe page.
+    // They are released after 5 minutes of inactivity via `release_asr_models`.
+    // This reduces startup memory usage from ~500MB to ~50MB.
 
     let active_ocr_model = initial_config.active_ocr_model.clone();
     // Extract shortcut before initial_config is moved into AppState
@@ -685,6 +598,8 @@ pub fn run() {
             commands::transcribe::apply_vad_settings,
             // App init
             commands::transcribe::get_init_status,
+            commands::transcribe::ensure_asr_models,
+            commands::transcribe::release_asr_models,
             // 模型命令
             commands::model::list_models,
             commands::model::get_model_path,

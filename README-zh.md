@@ -1,19 +1,32 @@
 # VelociText
 
-> **极致离线视频/音频转文字工具**
+> **极致离线视频/音频转文字 & 文字识别工具**
 
-VelociText 是一款极速、跨平台的离线语音识别桌面应用。基于 [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) 引擎，支持 SenseVoice-Small 和 Paraformer-Large 双模型，完全在本地转录音视频文件 — **无需联网，数据隐私无忧**。
+VelociText 是一款极速、跨平台的离线语音识别和文字识别桌面应用。基于 [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) 引擎，支持 SenseVoice-Small 和 Paraformer-Large 双 ASR 模型，同时集成 PaddleOCR（V4/V5/V6）文字识别 — 所有处理完全在本地完成。**无需联网，数据隐私无忧。**
 
 ## 功能特性
 
+### 语音识别（ASR）
 - **完全离线** — 所有处理均在本地完成，无需云端、无需 API Key、数据不会泄露。
 - **多格式支持** — MP3、WAV、FLAC、OGG、AAC、M4A、AIFF、MP4、MOV、MKV、WebM 等（纯 Rust 解码，无需 FFmpeg）。
 - **双 ASR 模型** — 在模型管理界面一键切换 SenseVoice-Small（多语言）和 Paraformer-Large（更高精度中文）。
+- **Qwen3-ASR 模型** — 额外的高精度多语言 ASR 模型选项。
 - **智能 VAD** — Silero VAD 语音活动检测，毫秒级精度识别语音段落。
 - **流式管线** — 增量音频解码 + VAD + ASR，实时进度显示，低内存占用。
 - **多格式导出** — 支持导出为 TXT（带时间戳）、SRT、VTT 字幕文件。
-- **多语言界面** — 支持中文和英文界面切换；SenseVoice 支持中文、英文、粤语、日语、韩语。
-- **模型管理** — 一键从 ModelScope.cn 下载模型，带进度显示；随时切换活跃模型。
+
+### 文字识别（OCR）
+- **PaddleOCR 模型** — 支持 PP-OCR V4、V5、V6 ONNX 模型，一键下载。
+- **图片 OCR** — 拖放或文件选择器加载图片（PNG、JPG、BMP、WEBP、TIFF）进行文字识别。
+- **截图 OCR** — 按全局快捷键（默认 `Ctrl+Shift+O`）截取任意屏幕区域，自动识别文字并复制到剪贴板。支持多显示器。
+- **词典纠错** — 自定义热词词典，用于 OCR 后文本纠正。
+
+### 应用特性
+- **系统托盘** — 关闭窗口最小化到系统托盘，左键恢复，右键退出。
+- **单实例运行** — 只允许运行一个实例，再次启动时激活已有窗口。
+- **全局快捷键** — 截图 OCR 快捷键在应用最小化或托盘状态下也可使用。
+- **多语言界面** — 支持中文和英文界面切换。
+- **模型管理** — 一键下载模型，带进度显示；随时切换活跃模型。
 
 ## 技术栈
 
@@ -22,9 +35,12 @@ VelociText 是一款极速、跨平台的离线语音识别桌面应用。基于
 | 桌面框架 | [Tauri v2](https://v2.tauri.app)（Rust 后端） |
 | 前端 | React 19 + TypeScript + [shadcn/ui](https://ui.shadcn.com) |
 | ASR 引擎 | [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) v1.13 |
-| 语音模型 | SenseVoice-Small（q8 量化，约 230MB）+ Paraformer-Large（int8 量化，约 238MB） |
+| OCR 引擎 | [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) via [paddle-ocr-rs](https://github.com/mg-chao/paddle-ocr-rs) |
+| 语音模型 | SenseVoice-Small（q8 量化，约 230MB）+ Paraformer-Large（int8 量化，约 238MB）+ Qwen3-ASR |
+| OCR 模型 | PP-OCR V4/V5/V6 ONNX（每个约 25MB） |
 | VAD 模型 | Silero VAD ONNX（约 2.7MB） |
 | 音视频解码 | [symphonia](https://github.com/pdeljanov/Symphonia)（纯 Rust，无需 FFmpeg） |
+| 截图捕获 | [xcap](https://github.com/nicepkg/xcap)（多显示器支持） |
 | 构建工具 | [Bun](https://bun.sh) + Vite |
 
 ## 路线图
@@ -32,9 +48,12 @@ VelociText 是一款极速、跨平台的离线语音识别桌面应用。基于
 - [x] SenseVoice-Small 离线语音识别
 - [x] VAD 智能语音分段
 - [x] SRT/VTT 字幕导出
-- [x] **Paraformer-Large ONNX** — 更高精度的中文语音识别模型
-- [x] 模型切换 UI（SenseVoice ↔ Paraformer）
+- [x] Paraformer-Large ONNX — 更高精度的中文语音识别模型
+- [x] 模型切换 UI（SenseVoice ↔ Paraformer ↔ Qwen3-ASR）
 - [x] 纯 Rust 音视频解码（symphonia，无 FFmpeg 依赖）
+- [x] OCR 文字识别（PaddleOCR V4/V5/V6）
+- [x] 截图 OCR（全局快捷键 + 多显示器支持）
+- [x] 系统托盘和单实例运行
 - [ ] 说话人分离（Speaker Diarization）
 - [ ] 自定义热词 UI 管理
 
@@ -60,13 +79,15 @@ bun run tauri build
 
 ### 模型下载
 
-ASR 模型和 Silero VAD 模型可在应用内通过 **设置 → 模型管理 → 下载** 获取。
+ASR 和 OCR 模型可在应用内通过 **设置 → 模型管理 → 下载** 获取。
 
 | 模型 | 大小 | 说明 |
 |------|------|------|
 | SenseVoice-Small | 约 230MB (q8) | 多语言：中文、英文、粤语、日语、韩语 |
 | Paraformer-Large | 约 238MB (int8) | 更高精度的中文语音识别 |
+| Qwen3-ASR | 约 400MB | 高精度多语言语音识别 |
 | Silero VAD | 约 2.7MB | 语音活动检测，用于语音分段 |
+| PP-OCR V4/V5/V6 | 每个约 25MB | 文字识别（OCR）模型 |
 
 模型存储在可配置的本地目录中，默认路径为 `{应用数据目录}/models/`。
 
@@ -83,11 +104,13 @@ MIT
 VelociText 的构建得益于以下优秀开源项目：
 
 - [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) — 核心 ASR 推理引擎，驱动离线语音识别
+- [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) — 出色的多语言 OCR 工具
+- [paddle-ocr-rs](https://github.com/mg-chao/paddle-ocr-rs) — PaddleOCR ONNX 推理的 Rust 绑定
 - [SenseVoice](https://github.com/FunAudioLLM/SenseVoice) — FunAudioLLM 多语言语音识别模型
 - [Paraformer](https://www.modelscope.cn/models/iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-onnx) — 阿里达摩院高精度中文语音识别模型
 - [Silero VAD](https://github.com/snakers4/silero-vad) — 语音活动检测模型，用于语音分段
 - [symphonia](https://github.com/pdeljanov/Symphonia) — 纯 Rust 音频解码库
+- [xcap](https://github.com/nicepkg/xcap) — 跨平台屏幕捕获库
 - [Tauri](https://tauri.app/) — 跨平台桌面应用框架
 - [React](https://react.dev/) — 前端 UI 库
 - [shadcn/ui](https://ui.shadcn.com/) — 精美设计的 UI 组件
-- [ModelScope](https://modelscope.cn/) — 模型托管与分发平台

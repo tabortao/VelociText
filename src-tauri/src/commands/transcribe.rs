@@ -581,6 +581,146 @@ pub fn get_init_status(state: State<'_, AppState>) -> InitStatus {
     }
 }
 
+/// Ensure ASR models are loaded (lazy loading).
+/// Called when the user navigates to the Transcribe page.
+/// If models are already loaded (status == 1), returns immediately.
+/// If models are loading (status == 0), waits for completion.
+/// If models were released or never loaded, triggers loading.
+#[tauri::command]
+pub async fn ensure_asr_models(state: State<'_, AppState>) -> Result<InitStatus, String> {
+    let current_status = state.init_status.load(Ordering::Relaxed);
+
+    // Already ready
+    if current_status == 1 {
+        return Ok(InitStatus {
+            status: 1,
+            error: String::new(),
+            num_threads: state.num_threads.load(Ordering::Relaxed),
+        });
+    }
+
+    // Currently loading — just return status, frontend will poll
+    if current_status == 0 {
+        return Ok(InitStatus {
+            status: 0,
+            error: String::new(),
+            num_threads: 0,
+        });
+    }
+
+    // Status == 2 (error) or models were released (status reset to 3)
+    // Need to (re)load models
+    let model_path = {
+        let config = state.config.lock().map_err(|e| e.to_string())?;
+        config.model_path.clone()
+    };
+    let active_model_name = state
+        .active_model
+        .lock()
+        .map(|a| a.clone())
+        .unwrap_or_default();
+    let hotwords_file = state
+        .hotwords_file_path
+        .lock()
+        .map(|h| h.clone())
+        .unwrap_or(None);
+    let settings = state
+        .vad_settings
+        .lock()
+        .map(|s| s.clone())
+        .map_err(|e| e.to_string())?;
+
+    // Set status to loading
+    state.init_status.store(0, Ordering::Relaxed);
+
+    let recognizer_arc = Arc::clone(&state.recognizer);
+    let vad_arc = Arc::clone(&state.vad_detector);
+    let init_status_arc = Arc::clone(&state.init_status);
+    let init_error_arc = Arc::clone(&state.init_error);
+    let num_threads_arc = Arc::clone(&state.num_threads);
+    let active_model_arc = Arc::clone(&state.active_model);
+
+    tokio::task::spawn_blocking(move || {
+        let preferred = if active_model_name.is_empty() {
+            None
+        } else {
+            Some(active_model_name.as_str())
+        };
+
+        // Write crash marker
+        let marker_path = std::path::Path::new(&model_path).join(".model_loading");
+        if let Some(parent) = marker_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(&marker_path, &active_model_name);
+
+        match crate::build_models(&model_path, &settings, preferred, hotwords_file) {
+            Ok((rec, vad, threads, model_name)) => {
+                let _ = std::fs::remove_file(&marker_path);
+
+                log::info!("[ensure_asr_models] models loaded, threads={threads}, model={model_name}");
+                let _ = recognizer_arc.lock().map(|mut r| *r = Some(rec));
+                let _ = vad_arc.lock().map(|mut v| *v = Some(vad));
+                num_threads_arc.store(threads, Ordering::Relaxed);
+                let _ = active_model_arc.lock().map(|mut a| *a = model_name.clone());
+
+                // Persist actual model to config
+                let mut cfg = crate::config::app_config::AppConfig::load();
+                if cfg.active_model != model_name {
+                    cfg.active_model = model_name;
+                    let _ = crate::config::app_config::AppConfig::save(&cfg);
+                }
+
+                init_status_arc.store(1, Ordering::Relaxed);
+            }
+            Err(e) => {
+                let _ = std::fs::remove_file(&marker_path);
+                log::error!("[ensure_asr_models] failed: {e}");
+                let _ = init_error_arc.lock().map(|mut err| *err = e);
+                init_status_arc.store(2, Ordering::Relaxed);
+            }
+        }
+    })
+    .await
+    .map_err(|e| format!("Model loading task failed: {e}"))?;
+
+    Ok(InitStatus {
+        status: state.init_status.load(Ordering::Relaxed),
+        error: state
+            .init_error
+            .lock()
+            .map(|e| e.clone())
+            .unwrap_or_default(),
+        num_threads: state.num_threads.load(Ordering::Relaxed),
+    })
+}
+
+/// Release ASR models from memory to reduce RAM usage.
+/// Called when the user has been away from the Transcribe page for a timeout period.
+#[tauri::command]
+pub fn release_asr_models(state: State<'_, AppState>) -> Result<(), String> {
+    // Don't release while recognition is running
+    if state.running.load(Ordering::SeqCst) {
+        return Err("Cannot release models while recognition is running".to_string());
+    }
+
+    // Drop recognizer and VAD
+    {
+        let mut rec = state.recognizer.lock().map_err(|e| e.to_string())?;
+        *rec = None;
+    }
+    {
+        let mut vad = state.vad_detector.lock().map_err(|e| e.to_string())?;
+        *vad = None;
+    }
+
+    // Reset init status so next ensure_asr_models will reload
+    state.init_status.store(3, Ordering::Relaxed); // 3 = released
+
+    log::info!("[release_asr_models] ASR models released from memory");
+    Ok(())
+}
+
 /// Start recognition in a background thread. Returns immediately.
 /// Frontend should poll `get_recognition_progress` to track progress.
 #[tauri::command]
@@ -599,6 +739,10 @@ pub fn recognize_file(path: String, state: State<'_, AppState>) -> Result<(), St
         state.running.store(false, Ordering::SeqCst);
         let err = state.init_error.lock().map_err(|e| e.to_string())?.clone();
         return Err(format!("Initialization failed: {err}"));
+    }
+    if init == 3 {
+        state.running.store(false, Ordering::SeqCst);
+        return Err("Models have been released. Please wait for them to reload.".to_string());
     }
 
     log::info!("[recognize_file] starting recognition for: {path}");

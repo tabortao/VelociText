@@ -138,7 +138,7 @@ export function TranscribePage() {
     flashTimerRef.current = setTimeout(() => setFlashMessage(""), durationMs)
   }
 
-  // ── Model initialization polling ────────────────────────────────────────
+  // ── Model initialization (lazy loading) ────────────────────────────────
   const startInitPolling = useCallback(() => {
     const poll = setInterval(async () => {
       try {
@@ -154,6 +154,7 @@ export function TranscribePage() {
           clearInterval(poll)
         }
         // status 0 — still loading, continue polling
+        // status 3 — released, should not happen after ensure_asr_models
       } catch (err) {
         setModelError(String(err))
         setTranscribeState("error")
@@ -164,12 +165,50 @@ export function TranscribePage() {
   }, [])
 
   useEffect(() => {
-    startInitPolling()
+    // Cancel any pending release timer from a previous visit
+    if (window.__velocitext_release_timer) {
+      clearTimeout(window.__velocitext_release_timer)
+      window.__velocitext_release_timer = undefined
+    }
+
+    // Trigger lazy loading of ASR models when the Transcribe page mounts
+    const loadModels = async () => {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core")
+        const res = await invoke<InitStatus>("ensure_asr_models")
+        if (res.status === 1) {
+          setModelsReady(true)
+          setTranscribeState("idle")
+        } else if (res.status === 0) {
+          // Still loading, start polling
+          startInitPolling()
+        } else if (res.status === 2) {
+          setModelError(res.error || "Unknown error")
+          setTranscribeState("error")
+        }
+      } catch (err) {
+        setModelError(String(err))
+        setTranscribeState("error")
+      }
+    }
+    loadModels()
+
     return () => {
       if (initPollRef.current) clearInterval(initPollRef.current)
       if (pollTimerRef.current) clearInterval(pollTimerRef.current)
       if (flashTimerRef.current) clearTimeout(flashTimerRef.current)
       if (rafId.current) cancelAnimationFrame(rafId.current)
+
+      // Start 5-minute timer to release ASR models after leaving the page
+      window.__velocitext_release_timer = setTimeout(async () => {
+        try {
+          const { invoke } = await import("@tauri-apps/api/core")
+          await invoke("release_asr_models")
+          console.log("[ASR] models released after 5 min inactivity")
+        } catch {
+          // ignore (might be running or already released)
+        }
+      }, 5 * 60 * 1000)
     }
   }, [startInitPolling])
 
