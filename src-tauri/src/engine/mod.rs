@@ -1,11 +1,11 @@
 pub mod audio_decoder;
 pub mod audio_extractor;
+pub mod export;
+pub mod model_manager;
+pub mod ocr;
+pub mod progress;
 pub mod recognizer;
 pub mod recognizer_factory;
 pub mod transcriber;
-pub mod model_manager;
-pub mod export;
-pub mod progress;
 pub mod transcription_pipeline;
 pub mod vad;
-pub mod ocr;

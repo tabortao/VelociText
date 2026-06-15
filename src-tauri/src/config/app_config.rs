@@ -24,6 +24,13 @@ pub struct AppConfig {
     /// 活跃 OCR 模型: "ppocr-v4" | "ppocr-v5" | "ppocr-v6"
     #[serde(default = "default_active_ocr_model")]
     pub active_ocr_model: String,
+    /// OCR 截图快捷键 (如 "Ctrl+Shift+O")
+    #[serde(default = "default_ocr_screenshot_shortcut")]
+    pub ocr_screenshot_shortcut: String,
+}
+
+fn default_ocr_screenshot_shortcut() -> String {
+    "Ctrl+Shift+O".to_string()
 }
 
 fn default_active_ocr_model() -> String {
@@ -47,6 +54,7 @@ impl Default for AppConfig {
             active_model: default_active_model(),
             sidebar_collapsed: false,
             active_ocr_model: default_active_ocr_model(),
+            ocr_screenshot_shortcut: default_ocr_screenshot_shortcut(),
         }
     }
 }
@@ -62,17 +70,15 @@ impl AppConfig {
         let path = Self::config_file_path();
         if path.exists() {
             match std::fs::read_to_string(&path) {
-                Ok(content) => {
-                    match serde_json::from_str(&content) {
-                        Ok(config) => {
-                            log::info!("[AppConfig] loaded from {}", path.display());
-                            return config;
-                        }
-                        Err(e) => {
-                            log::warn!("[AppConfig] failed to parse config: {e}, using defaults");
-                        }
+                Ok(content) => match serde_json::from_str(&content) {
+                    Ok(config) => {
+                        log::info!("[AppConfig] loaded from {}", path.display());
+                        return config;
                     }
-                }
+                    Err(e) => {
+                        log::warn!("[AppConfig] failed to parse config: {e}, using defaults");
+                    }
+                },
                 Err(e) => {
                     log::warn!("[AppConfig] failed to read config: {e}, using defaults");
                 }
@@ -85,9 +91,11 @@ impl AppConfig {
     pub fn save(&self) -> Result<(), String> {
         let path = Self::config_file_path();
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create config dir: {e}"))?;
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create config dir: {e}"))?;
         }
-        let content = serde_json::to_string_pretty(self).map_err(|e| format!("Failed to serialize config: {e}"))?;
+        let content = serde_json::to_string_pretty(self)
+            .map_err(|e| format!("Failed to serialize config: {e}"))?;
         std::fs::write(&path, content).map_err(|e| format!("Failed to write config: {e}"))?;
         log::info!("[AppConfig] saved to {}", path.display());
         Ok(())

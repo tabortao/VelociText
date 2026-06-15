@@ -25,7 +25,10 @@ mod transcribe_integration {
         let model_dir = Path::new(&appdata).join("VelociText/models/sense-voice-small");
 
         if !is_model_installed_at(&model_dir) {
-            eprintln!("SKIP: SenseVoice-Small model not installed at {:?}", model_dir);
+            eprintln!(
+                "SKIP: SenseVoice-Small model not installed at {:?}",
+                model_dir
+            );
             return;
         }
 
@@ -33,13 +36,14 @@ mod transcribe_integration {
         let temp_wav = tempfile::NamedTempFile::new().expect("Failed to create temp file");
         let wav_path = temp_wav.path().to_string_lossy().to_string();
 
-        let duration = extract_audio(
-            test_mp3.to_str().unwrap(),
-            &wav_path,
-        )
-        .expect("FFmpeg audio extraction failed");
+        let duration = extract_audio(test_mp3.to_str().unwrap(), &wav_path)
+            .expect("FFmpeg audio extraction failed");
 
-        assert!(duration > 0.0, "Audio duration should be > 0, got {}", duration);
+        assert!(
+            duration > 0.0,
+            "Audio duration should be > 0, got {}",
+            duration
+        );
         println!("  Duration: {:.2}s", duration);
 
         // 2. Create recognizer via factory
@@ -56,8 +60,7 @@ mod transcribe_integration {
         println!("  Recognizer created successfully");
 
         // 3. Run recognition
-        let audio = sherpa_onnx::Wave::read(&wav_path)
-            .expect("Failed to read WAV file");
+        let audio = sherpa_onnx::Wave::read(&wav_path).expect("Failed to read WAV file");
         let stream = recognizer.create_stream();
         stream.accept_waveform(audio.sample_rate(), audio.samples());
         recognizer.decode(&stream);
@@ -71,12 +74,11 @@ mod transcribe_integration {
         );
 
         // 4. Test VAD segmentation on the same file
-        let model_path = Path::new(&appdata).join("VelociText/models/sense-voice-small/silero_vad.onnx");
-        let segments = crate::engine::vad::detect_speech_segments(
-            &wav_path,
-            model_path.to_str().unwrap(),
-        )
-        .expect("VAD detection failed");
+        let model_path =
+            Path::new(&appdata).join("VelociText/models/sense-voice-small/silero_vad.onnx");
+        let segments =
+            crate::engine::vad::detect_speech_segments(&wav_path, model_path.to_str().unwrap())
+                .expect("VAD detection failed");
         println!("  VAD segments detected: {}", segments.0.len());
 
         println!("  PASS: Full transcription pipeline works!");
@@ -115,7 +117,9 @@ mod ocr_integration {
 
     fn test_ocr_demo(model_version: &str) {
         let appdata = std::env::var("APPDATA").unwrap_or_default();
-        let model_dir = Path::new(&appdata).join("VelociText/models").join(model_version);
+        let model_dir = Path::new(&appdata)
+            .join("VelociText/models")
+            .join(model_version);
         let demo_image = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../docs/demo.png"));
 
         if !model_dir.exists() {
@@ -130,7 +134,8 @@ mod ocr_integration {
         let mut engine = OcrEngine::new_with_memory(&model_dir, false)
             .expect(&format!("[{model_version}] Failed to init OCR engine"));
 
-        let result = engine.recognize_from_path(demo_image)
+        let result = engine
+            .recognize_from_path(demo_image)
             .expect(&format!("[{model_version}] OCR recognition failed"));
 
         let full_text: String = result

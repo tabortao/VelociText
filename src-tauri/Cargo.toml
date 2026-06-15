@@ -78,6 +78,13 @@ num_cpus = "1.17"
 image = "0.25"
 rayon = "1.10"
 
+# 截图 (cross-platform screen capture, references snow-shot)
+xcap = "0.3"
+tauri-plugin-clipboard-manager = "2"
+
+# 剪贴板 (used directly for reliable clipboard access)
+arboard = "3"
+
 
 [profile.dev]
 incremental = true # Compile your binary in smaller steps.

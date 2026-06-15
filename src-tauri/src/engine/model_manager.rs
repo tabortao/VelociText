@@ -6,7 +6,12 @@ use std::io::Read;
 use std::path::Path;
 
 /// Download a file from URL to destination, reporting progress.
-fn download_file(url: &str, dest: &Path, model_name: &str, on_progress: &dyn Fn(DownloadProgress)) -> AppResult<()> {
+fn download_file(
+    url: &str,
+    dest: &Path,
+    model_name: &str,
+    on_progress: &dyn Fn(DownloadProgress),
+) -> AppResult<()> {
     let resp = ureq::get(url)
         .call()
         .map_err(|e| AppError::ModelDownload(format!("HTTP request failed: {}", e)))?;
@@ -116,10 +121,8 @@ pub fn is_ppocr_installed_at(dir: &Path) -> bool {
 /// Check if Qwen3-ASR model is installed at the given directory.
 pub fn is_qwen3_asr_installed_at(dir: &Path) -> bool {
     let has_conv_frontend = dir.join("conv_frontend.onnx").exists();
-    let has_encoder = dir.join("encoder.int8.onnx").exists()
-        || dir.join("encoder.onnx").exists();
-    let has_decoder = dir.join("decoder.int8.onnx").exists()
-        || dir.join("decoder.onnx").exists();
+    let has_encoder = dir.join("encoder.int8.onnx").exists() || dir.join("encoder.onnx").exists();
+    let has_decoder = dir.join("decoder.int8.onnx").exists() || dir.join("decoder.onnx").exists();
     let has_tokenizer = dir.join("tokenizer").exists();
     has_conv_frontend && has_encoder && has_decoder && has_tokenizer
 }
@@ -267,8 +270,8 @@ impl ModelManager {
         let base_url = "https://www.modelscope.cn/models/xiaowangge/sherpa-onnx-sense-voice-small/resolve/master";
         let files: &[(&str, u64)] = &[
             ("model_q8.onnx", 228), // ~228 MB
-            ("tokens.txt", 1),       // ~316 KB
-            ("README.md", 0),        // optional
+            ("tokens.txt", 1),      // ~316 KB
+            ("README.md", 0),       // optional
         ];
 
         for (file_name, size_mb) in files {
@@ -326,9 +329,7 @@ impl ModelManager {
 
         // 验证
         if !is_model_installed_at(&model_dir) {
-            return Err(AppError::ModelDownload(
-                "下载完成但模型文件校验失败".into(),
-            ));
+            return Err(AppError::ModelDownload("下载完成但模型文件校验失败".into()));
         }
 
         on_progress(DownloadProgress {
@@ -444,7 +445,11 @@ impl ModelManager {
                 if !content.trim_start().starts_with('[') {
                     let model_int8 = model_dir.join("model.int8.onnx");
                     let model_plain = model_dir.join("model.onnx");
-                    let model_file = if model_int8.exists() { &model_int8 } else { &model_plain };
+                    let model_file = if model_int8.exists() {
+                        &model_int8
+                    } else {
+                        &model_plain
+                    };
                     if model_file.exists() {
                         let model_size_ok = std::fs::metadata(model_file)
                             .map(|m| m.len() > 50_000_000)
@@ -464,13 +469,17 @@ impl ModelManager {
                 }
             }
             // Old/broken model files exist — clean them up before re-downloading
-            log::warn!("[download_paraformer] cleaning up old/broken model files in {:?}", model_dir);
+            log::warn!(
+                "[download_paraformer] cleaning up old/broken model files in {:?}",
+                model_dir
+            );
             let _ = std::fs::remove_dir_all(&model_dir);
             std::fs::create_dir_all(&model_dir)?;
         }
 
         // Download zip from gitcode.com (fast in China)
-        let archive_url = "https://gitcode.com/tabortao/VelociText/releases/download/v0.1.2/paraformer.zip";
+        let archive_url =
+            "https://gitcode.com/tabortao/VelociText/releases/download/v0.1.2/paraformer.zip";
 
         on_progress(DownloadProgress {
             model_name: "paraformer".into(),
@@ -501,7 +510,8 @@ impl ModelManager {
             .map_err(|e| AppError::ModelDownload(format!("Read zip archive failed: {}", e)))?;
 
         for i in 0..archive.len() {
-            let mut entry = archive.by_index(i)
+            let mut entry = archive
+                .by_index(i)
                 .map_err(|e| AppError::ModelDownload(format!("Read zip entry failed: {}", e)))?;
 
             let name = entry.name().to_string();
@@ -552,10 +562,7 @@ impl ModelManager {
     /// - `encoder.int8.onnx` — encoder model
     /// - `decoder.int8.onnx` — decoder model
     /// - `tokenizer/` — tokenizer directory
-    pub fn download_qwen3_asr(
-        &self,
-        on_progress: &dyn Fn(DownloadProgress),
-    ) -> AppResult<String> {
+    pub fn download_qwen3_asr(&self, on_progress: &dyn Fn(DownloadProgress)) -> AppResult<String> {
         let model_dir = Path::new(&self.models_dir).join("qwen3-asr");
         std::fs::create_dir_all(&model_dir)?;
 
@@ -602,7 +609,8 @@ impl ModelManager {
             .map_err(|e| AppError::ModelDownload(format!("Read zip archive failed: {}", e)))?;
 
         for i in 0..archive.len() {
-            let mut entry = archive.by_index(i)
+            let mut entry = archive
+                .by_index(i)
                 .map_err(|e| AppError::ModelDownload(format!("Read zip entry failed: {}", e)))?;
 
             let name = entry.name().to_string();
@@ -642,8 +650,9 @@ impl ModelManager {
                 };
 
                 if let Some(parent) = dest.parent() {
-                    std::fs::create_dir_all(parent)
-                        .map_err(|e| AppError::ModelDownload(format!("Create dir failed: {}", e)))?;
+                    std::fs::create_dir_all(parent).map_err(|e| {
+                        AppError::ModelDownload(format!("Create dir failed: {}", e))
+                    })?;
                 }
 
                 let mut file_content = Vec::new();
@@ -651,7 +660,11 @@ impl ModelManager {
                     .map_err(|e| AppError::ModelDownload(format!("Read entry failed: {}", e)))?;
                 std::fs::write(&dest, &file_content)
                     .map_err(|e| AppError::ModelDownload(format!("Write file failed: {}", e)))?;
-                log::info!("[download_qwen3_asr] extracted {} -> {}", name, dest.display());
+                log::info!(
+                    "[download_qwen3_asr] extracted {} -> {}",
+                    name,
+                    dest.display()
+                );
             }
         }
 
@@ -733,7 +746,8 @@ impl ModelManager {
             .map_err(|e| AppError::ModelDownload(format!("Read zip archive failed: {}", e)))?;
 
         for i in 0..archive.len() {
-            let mut entry = archive.by_index(i)
+            let mut entry = archive
+                .by_index(i)
                 .map_err(|e| AppError::ModelDownload(format!("Read zip entry failed: {}", e)))?;
 
             let name = entry.name().to_string();
@@ -759,7 +773,11 @@ impl ModelManager {
                     .map_err(|e| AppError::ModelDownload(format!("Read entry failed: {}", e)))?;
                 std::fs::write(&dest, &file_content)
                     .map_err(|e| AppError::ModelDownload(format!("Write file failed: {}", e)))?;
-                log::info!("[download_ppocr] extracted {} -> {}", filename, dest.display());
+                log::info!(
+                    "[download_ppocr] extracted {} -> {}",
+                    filename,
+                    dest.display()
+                );
             }
         }
 

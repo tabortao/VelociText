@@ -25,8 +25,7 @@ pub fn segment_text(text: &str, total_duration: f64) -> Vec<TranscribeSegment> {
         // 短停顿标点（逗号等），如果积累够了也分段
         let is_clause_end = matches!(ch, '；' | '，' | ',' | ';');
 
-        let should_split = is_sentence_end
-            || (is_clause_end && current.chars().count() >= 15);
+        let should_split = is_sentence_end || (is_clause_end && current.chars().count() >= 15);
 
         if should_split {
             let text = current.trim().to_string();
@@ -172,8 +171,16 @@ mod tests {
     #[test]
     fn test_export_txt() {
         let segments = vec![
-            TranscribeSegment { start: 1.5, end: 2.5, text: "你好".into() },
-            TranscribeSegment { start: 3.0, end: 5.0, text: "世界".into() },
+            TranscribeSegment {
+                start: 1.5,
+                end: 2.5,
+                text: "你好".into(),
+            },
+            TranscribeSegment {
+                start: 3.0,
+                end: 5.0,
+                text: "世界".into(),
+            },
         ];
         let txt = ExportManager::to_txt(&segments);
         assert!(txt.contains("[00:01.50] 你好"));
@@ -182,9 +189,11 @@ mod tests {
 
     #[test]
     fn test_export_srt() {
-        let segments = vec![
-            TranscribeSegment { start: 0.0, end: 1.5, text: "你好世界".into() },
-        ];
+        let segments = vec![TranscribeSegment {
+            start: 0.0,
+            end: 1.5,
+            text: "你好世界".into(),
+        }];
         let srt = ExportManager::to_srt(&segments);
         assert!(srt.contains("00:00:00,000 --> 00:00:01,500"));
         assert!(srt.contains("你好世界"));

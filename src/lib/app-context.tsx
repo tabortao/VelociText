@@ -9,7 +9,7 @@ const dict = {
     features: "功能",
     transcribe: "转录",
     dictionary: "词典",
-    ocr: "OCR",
+    ocr: "文本识别",
     history: "历史记录",
     settingsLabel: "设置",
     settings: "设置",
@@ -19,7 +19,7 @@ const dict = {
     // SiteHeader
     "header.transcribe": "转录",
     "header.dictionary": "词典",
-    "header.ocr": "OCR",
+    "header.ocr": "文本识别",
     "header.history": "历史记录",
     "header.settings": "设置",
     "header.model-settings": "模型管理",
@@ -109,6 +109,8 @@ const dict = {
     "settings.txtFormat": "纯文本 (.txt)",
     "settings.srtFormat": "SRT 字幕 (.srt)",
     "settings.vttFormat": "VTT 字幕 (.vtt)",
+    "settings.ocrScreenshotShortcut": "截图 OCR 快捷键",
+    "settings.ocrScreenshotShortcutDesc": "设置截图识别的快捷键，例如 Ctrl+Shift+O",
 
     // Model settings page
     "models.title.storage": "模型存储路径",
@@ -194,13 +196,17 @@ const dict = {
     "ocr.noModel": "未安装 OCR 模型，请先在模型管理中下载",
     "ocr.failed": "OCR 识别失败",
     "ocr.modelNotInstalled": "OCR 模型 {model} 未安装，请先在模型管理中下载",
+    "ocr.completedToast": "OCR 完成 · {blocks} 个文本块 · 耗时 {time}ms",
+    "ocr.screenshotBtn": "截图识别",
+    "ocr.screenshotDesc": "截取屏幕区域并识别文字",
+    "ocr.screenshotDone": "已复制到剪贴板",
   },
   en: {
     // Sidebar
     features: "Features",
     transcribe: "Transcribe",
     dictionary: "Dictionary",
-    ocr: "OCR",
+    ocr: "Text Recognition",
     history: "History",
     settingsLabel: "Settings",
     settings: "Settings",
@@ -210,7 +216,7 @@ const dict = {
     // SiteHeader
     "header.transcribe": "Transcribe",
     "header.dictionary": "Dictionary",
-    "header.ocr": "OCR",
+    "header.ocr": "Text Recognition",
     "header.history": "History",
     "header.settings": "Settings",
     "header.model-settings": "Models",
@@ -300,6 +306,8 @@ const dict = {
     "settings.txtFormat": "Plain Text (.txt)",
     "settings.srtFormat": "SRT Subtitles (.srt)",
     "settings.vttFormat": "VTT Subtitles (.vtt)",
+    "settings.ocrScreenshotShortcut": "Screenshot OCR Shortcut",
+    "settings.ocrScreenshotShortcutDesc": "Set the keyboard shortcut for screenshot OCR, e.g. Ctrl+Shift+O",
 
     // Model settings page
     "models.title.storage": "Model Storage Path",
@@ -385,6 +393,10 @@ const dict = {
     "ocr.noModel": "No OCR model installed. Please download one in Model Settings.",
     "ocr.failed": "OCR recognition failed",
     "ocr.modelNotInstalled": "OCR model {model} is not installed. Please download it in Model Settings.",
+    "ocr.completedToast": "OCR complete · {blocks} text block(s) · {time}ms",
+    "ocr.screenshotBtn": "Screenshot OCR",
+    "ocr.screenshotDesc": "Capture screen region and recognize text",
+    "ocr.screenshotDone": "Copied to clipboard",
   },
 }
 

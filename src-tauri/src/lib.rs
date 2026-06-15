@@ -58,7 +58,15 @@ fn build_models(
     settings: &VadSettings,
     preferred_model: Option<&str>,
     hotwords_file: Option<String>,
-) -> Result<(OfflineRecognizer, sherpa_onnx::VoiceActivityDetector, u32, String), String> {
+) -> Result<
+    (
+        OfflineRecognizer,
+        sherpa_onnx::VoiceActivityDetector,
+        u32,
+        String,
+    ),
+    String,
+> {
     // Find available model
     let available = RecognizerFactory::list_available(model_path);
 
@@ -70,7 +78,9 @@ fn build_models(
                 "paraformer" => engine::recognizer_factory::ModelType::Paraformer,
                 "qwen3-asr" => engine::recognizer_factory::ModelType::Qwen3Asr,
                 _ => {
-                    log::warn!("[build_models] unknown preferred model: {preferred}, auto-detecting");
+                    log::warn!(
+                        "[build_models] unknown preferred model: {preferred}, auto-detecting"
+                    );
                     return build_models(model_path, settings, None, hotwords_file);
                 }
             }
@@ -94,18 +104,26 @@ fn build_models(
     let model_dir_str = model_dir.to_string_lossy().to_string();
 
     // Auto-fix: if Paraformer tokens.txt is in JSON format, convert it
-    if matches!(model_type, engine::recognizer_factory::ModelType::Paraformer) {
+    if matches!(
+        model_type,
+        engine::recognizer_factory::ModelType::Paraformer
+    ) {
         let tokens_path = model_dir.join("tokens.txt");
         if tokens_path.exists() {
             if let Ok(content) = std::fs::read_to_string(&tokens_path) {
                 if content.trim_start().starts_with('[') {
-                    log::warn!("[build_models] Paraformer tokens.txt is in JSON format, converting...");
+                    log::warn!(
+                        "[build_models] Paraformer tokens.txt is in JSON format, converting..."
+                    );
                     if let Ok(tokens) = serde_json::from_str::<Vec<String>>(&content) {
                         let mut file = std::fs::File::create(&tokens_path).unwrap();
                         for (i, token) in tokens.iter().enumerate() {
                             let _ = writeln!(file, "{} {}", token, i);
                         }
-                        log::info!("[build_models] tokens.txt converted with {} tokens", tokens.len());
+                        log::info!(
+                            "[build_models] tokens.txt converted with {} tokens",
+                            tokens.len()
+                        );
                     }
                 }
             }
@@ -140,138 +158,173 @@ fn build_models(
         effective_settings.num_threads
     );
 
-    let (recognizer, actual_dir_name) = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        engine::recognizer_factory::RecognizerFactory::create(&model_type, &config)
-    })) {
-        Ok(Ok(r)) => {
-            let name = if config.model_dir.contains("paraformer") {
-                "paraformer"
-            } else if config.model_dir.contains("qwen3-asr") {
-                "qwen3-asr"
-            } else {
-                "sense-voice-small"
-            };
-            (r, name.to_string())
-        }
-        Ok(Err(e)) => {
-            log::error!("[build_models] failed to create {} recognizer: {e}", model_type.display_name());
-            // Try to fall back to another available model
-            let fallback_type = match model_type {
-                engine::recognizer_factory::ModelType::Paraformer => {
-                    if available.contains(&"sense-voice-small".to_string()) {
-                        log::warn!("[build_models] falling back to SenseVoice-Small");
-                        Some(engine::recognizer_factory::ModelType::SenseVoice)
-                    } else if available.contains(&"qwen3-asr".to_string()) {
-                        log::warn!("[build_models] falling back to Qwen3-ASR");
-                        Some(engine::recognizer_factory::ModelType::Qwen3Asr)
-                    } else { None }
-                }
-                engine::recognizer_factory::ModelType::Qwen3Asr => {
-                    if available.contains(&"sense-voice-small".to_string()) {
-                        log::warn!("[build_models] falling back to SenseVoice-Small");
-                        Some(engine::recognizer_factory::ModelType::SenseVoice)
-                    } else if available.contains(&"paraformer".to_string()) {
+    let (recognizer, actual_dir_name) =
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            engine::recognizer_factory::RecognizerFactory::create(&model_type, &config)
+        })) {
+            Ok(Ok(r)) => {
+                let name = if config.model_dir.contains("paraformer") {
+                    "paraformer"
+                } else if config.model_dir.contains("qwen3-asr") {
+                    "qwen3-asr"
+                } else {
+                    "sense-voice-small"
+                };
+                (r, name.to_string())
+            }
+            Ok(Err(e)) => {
+                log::error!(
+                    "[build_models] failed to create {} recognizer: {e}",
+                    model_type.display_name()
+                );
+                // Try to fall back to another available model
+                let fallback_type = match model_type {
+                    engine::recognizer_factory::ModelType::Paraformer => {
+                        if available.contains(&"sense-voice-small".to_string()) {
+                            log::warn!("[build_models] falling back to SenseVoice-Small");
+                            Some(engine::recognizer_factory::ModelType::SenseVoice)
+                        } else if available.contains(&"qwen3-asr".to_string()) {
+                            log::warn!("[build_models] falling back to Qwen3-ASR");
+                            Some(engine::recognizer_factory::ModelType::Qwen3Asr)
+                        } else {
+                            None
+                        }
+                    }
+                    engine::recognizer_factory::ModelType::Qwen3Asr => {
+                        if available.contains(&"sense-voice-small".to_string()) {
+                            log::warn!("[build_models] falling back to SenseVoice-Small");
+                            Some(engine::recognizer_factory::ModelType::SenseVoice)
+                        } else if available.contains(&"paraformer".to_string()) {
+                            log::warn!("[build_models] falling back to Paraformer");
+                            Some(engine::recognizer_factory::ModelType::Paraformer)
+                        } else {
+                            None
+                        }
+                    }
+                    engine::recognizer_factory::ModelType::SenseVoice
+                        if available.contains(&"paraformer".to_string()) =>
+                    {
                         log::warn!("[build_models] falling back to Paraformer");
                         Some(engine::recognizer_factory::ModelType::Paraformer)
-                    } else { None }
-                }
-                engine::recognizer_factory::ModelType::SenseVoice
-                    if available.contains(&"paraformer".to_string()) => {
-                    log::warn!("[build_models] falling back to Paraformer");
-                    Some(engine::recognizer_factory::ModelType::Paraformer)
-                }
-                engine::recognizer_factory::ModelType::SenseVoice
-                    if available.contains(&"qwen3-asr".to_string()) => {
-                    log::warn!("[build_models] falling back to Qwen3-ASR");
-                    Some(engine::recognizer_factory::ModelType::Qwen3Asr)
-                }
-                _ => None,
-            };
-            match fallback_type {
-                Some(ft) => {
-                    let fb_dir = Path::new(model_path).join(ft.dir_name());
-                    // Don't pass hotwords to fallback — avoid cascading failure
-                    let fb_config = engine::recognizer_factory::RecognizerConfig {
-                        model_dir: fb_dir.to_string_lossy().to_string(),
-                        num_threads: settings.num_threads as u32,
-                        hotwords_file: None,
-                        hotwords_score: 1.5,
-                        use_itn: true,
-                    };
-                    let fb_name = ft.dir_name().to_string();
-                    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        engine::recognizer_factory::RecognizerFactory::create(&ft, &fb_config)
-                    })) {
-                        Ok(Ok(r)) => (r, fb_name),
-                        Ok(Err(fe)) => return Err(format!("Fallback also failed: {fe}")),
-                        Err(_) => return Err(format!("Fallback model panicked during creation")),
                     }
-                }
-                None => return Err(format!("Failed to create {} recognizer: {e}", model_type.display_name())),
-            }
-        }
-        Err(panic_info) => {
-            log::error!("[build_models] {} recognizer creation panicked: {:?}", model_type.display_name(), panic_info);
-            // Try to fall back to another available model
-            let fallback_type = match model_type {
-                engine::recognizer_factory::ModelType::Paraformer => {
-                    if available.contains(&"sense-voice-small".to_string()) {
-                        Some(engine::recognizer_factory::ModelType::SenseVoice)
-                    } else if available.contains(&"qwen3-asr".to_string()) {
+                    engine::recognizer_factory::ModelType::SenseVoice
+                        if available.contains(&"qwen3-asr".to_string()) =>
+                    {
+                        log::warn!("[build_models] falling back to Qwen3-ASR");
                         Some(engine::recognizer_factory::ModelType::Qwen3Asr)
-                    } else { None }
-                }
-                engine::recognizer_factory::ModelType::Qwen3Asr => {
-                    if available.contains(&"sense-voice-small".to_string()) {
-                        Some(engine::recognizer_factory::ModelType::SenseVoice)
-                    } else if available.contains(&"paraformer".to_string()) {
-                        Some(engine::recognizer_factory::ModelType::Paraformer)
-                    } else { None }
-                }
-                engine::recognizer_factory::ModelType::SenseVoice
-                    if available.contains(&"paraformer".to_string()) => {
-                    Some(engine::recognizer_factory::ModelType::Paraformer)
-                }
-                engine::recognizer_factory::ModelType::SenseVoice
-                    if available.contains(&"qwen3-asr".to_string()) => {
-                    Some(engine::recognizer_factory::ModelType::Qwen3Asr)
-                }
-                _ => None,
-            };
-            match fallback_type {
-                Some(ft) => {
-                    let fb_dir = Path::new(model_path).join(ft.dir_name());
-                    // Don't pass hotwords to fallback — avoid cascading failure
-                    let fb_config = engine::recognizer_factory::RecognizerConfig {
-                        model_dir: fb_dir.to_string_lossy().to_string(),
-                        num_threads: settings.num_threads as u32,
-                        hotwords_file: None,
-                        hotwords_score: 1.5,
-                        use_itn: true,
-                    };
-                    let fb_name = ft.dir_name().to_string();
-                    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        engine::recognizer_factory::RecognizerFactory::create(&ft, &fb_config)
-                    })) {
-                        Ok(Ok(r)) => {
-                            log::warn!("[build_models] recovered from panic, using fallback model {}", fb_name);
-                            (r, fb_name)
+                    }
+                    _ => None,
+                };
+                match fallback_type {
+                    Some(ft) => {
+                        let fb_dir = Path::new(model_path).join(ft.dir_name());
+                        // Don't pass hotwords to fallback — avoid cascading failure
+                        let fb_config = engine::recognizer_factory::RecognizerConfig {
+                            model_dir: fb_dir.to_string_lossy().to_string(),
+                            num_threads: settings.num_threads as u32,
+                            hotwords_file: None,
+                            hotwords_score: 1.5,
+                            use_itn: true,
+                        };
+                        let fb_name = ft.dir_name().to_string();
+                        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            engine::recognizer_factory::RecognizerFactory::create(&ft, &fb_config)
+                        })) {
+                            Ok(Ok(r)) => (r, fb_name),
+                            Ok(Err(fe)) => return Err(format!("Fallback also failed: {fe}")),
+                            Err(_) => {
+                                return Err(format!("Fallback model panicked during creation"))
+                            }
                         }
-                        Ok(Err(fe)) => return Err(format!("Fallback after panic also failed: {fe}")),
-                        Err(_) => return Err("Fallback model also panicked".into()),
+                    }
+                    None => {
+                        return Err(format!(
+                            "Failed to create {} recognizer: {e}",
+                            model_type.display_name()
+                        ))
                     }
                 }
-                None => return Err(format!("{} model creation panicked and no fallback available", model_type.display_name())),
             }
-        }
-    };
+            Err(panic_info) => {
+                log::error!(
+                    "[build_models] {} recognizer creation panicked: {:?}",
+                    model_type.display_name(),
+                    panic_info
+                );
+                // Try to fall back to another available model
+                let fallback_type = match model_type {
+                    engine::recognizer_factory::ModelType::Paraformer => {
+                        if available.contains(&"sense-voice-small".to_string()) {
+                            Some(engine::recognizer_factory::ModelType::SenseVoice)
+                        } else if available.contains(&"qwen3-asr".to_string()) {
+                            Some(engine::recognizer_factory::ModelType::Qwen3Asr)
+                        } else {
+                            None
+                        }
+                    }
+                    engine::recognizer_factory::ModelType::Qwen3Asr => {
+                        if available.contains(&"sense-voice-small".to_string()) {
+                            Some(engine::recognizer_factory::ModelType::SenseVoice)
+                        } else if available.contains(&"paraformer".to_string()) {
+                            Some(engine::recognizer_factory::ModelType::Paraformer)
+                        } else {
+                            None
+                        }
+                    }
+                    engine::recognizer_factory::ModelType::SenseVoice
+                        if available.contains(&"paraformer".to_string()) =>
+                    {
+                        Some(engine::recognizer_factory::ModelType::Paraformer)
+                    }
+                    engine::recognizer_factory::ModelType::SenseVoice
+                        if available.contains(&"qwen3-asr".to_string()) =>
+                    {
+                        Some(engine::recognizer_factory::ModelType::Qwen3Asr)
+                    }
+                    _ => None,
+                };
+                match fallback_type {
+                    Some(ft) => {
+                        let fb_dir = Path::new(model_path).join(ft.dir_name());
+                        // Don't pass hotwords to fallback — avoid cascading failure
+                        let fb_config = engine::recognizer_factory::RecognizerConfig {
+                            model_dir: fb_dir.to_string_lossy().to_string(),
+                            num_threads: settings.num_threads as u32,
+                            hotwords_file: None,
+                            hotwords_score: 1.5,
+                            use_itn: true,
+                        };
+                        let fb_name = ft.dir_name().to_string();
+                        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            engine::recognizer_factory::RecognizerFactory::create(&ft, &fb_config)
+                        })) {
+                            Ok(Ok(r)) => {
+                                log::warn!(
+                                    "[build_models] recovered from panic, using fallback model {}",
+                                    fb_name
+                                );
+                                (r, fb_name)
+                            }
+                            Ok(Err(fe)) => {
+                                return Err(format!("Fallback after panic also failed: {fe}"))
+                            }
+                            Err(_) => return Err("Fallback model also panicked".into()),
+                        }
+                    }
+                    None => {
+                        return Err(format!(
+                            "{} model creation panicked and no fallback available",
+                            model_type.display_name()
+                        ))
+                    }
+                }
+            }
+        };
 
     log::info!("[build_models] recognizer created, actual_model={actual_dir_name}");
 
     // Create Silero VAD
-    let vad_model_path = Path::new(model_path)
-        .join("silero-vad")
-        .join("model.onnx");
+    let vad_model_path = Path::new(model_path).join("silero-vad").join("model.onnx");
     let vad_model_str = vad_model_path.to_string_lossy().to_string();
 
     if !vad_model_path.exists() {
@@ -282,7 +335,12 @@ fn build_models(
     let vad = create_silero_vad_with_settings(&vad_model_str, &effective_settings)?;
     log::info!("[build_models] VAD created");
 
-    Ok((recognizer, vad, effective_settings.num_threads as u32, actual_dir_name.to_string()))
+    Ok((
+        recognizer,
+        vad,
+        effective_settings.num_threads as u32,
+        actual_dir_name.to_string(),
+    ))
 }
 
 /// Create Silero VAD with custom settings.
@@ -345,10 +403,14 @@ pub fn run() {
 
     // Crash recovery: if a `.loading` marker file exists, the previous model load crashed the app.
     // Fall back to the other available model.
-    let crash_marker_path = std::path::PathBuf::from(&initial_config.model_path).join(".model_loading");
+    let crash_marker_path =
+        std::path::PathBuf::from(&initial_config.model_path).join(".model_loading");
     if crash_marker_path.exists() {
         if let Ok(crashed_model) = std::fs::read_to_string(&crash_marker_path) {
-            log::warn!("[init] crash detected: model '{}' caused crash on last load, falling back", crashed_model);
+            log::warn!(
+                "[init] crash detected: model '{}' caused crash on last load, falling back",
+                crashed_model
+            );
             // Try fallback models in priority order (SenseVoice is most reliable)
             let fallbacks = match crashed_model.as_str() {
                 "paraformer" => vec!["sense-voice-small", "qwen3-asr"],
@@ -402,7 +464,8 @@ pub fn run() {
     let init_error = Arc::new(Mutex::new(String::new()));
     let num_threads = Arc::new(AtomicU32::new(0));
     let vad_settings = Arc::new(Mutex::new(VadSettings::default()));
-    let active_model: Arc<Mutex<String>> = Arc::new(Mutex::new(initial_config.active_model.clone()));
+    let active_model: Arc<Mutex<String>> =
+        Arc::new(Mutex::new(initial_config.active_model.clone()));
 
     // Clone Arc handles for the init thread
     let init_recognizer = Arc::clone(&recognizer);
@@ -421,7 +484,11 @@ pub fn run() {
     std::thread::spawn(move || {
         log::info!("[init] starting model initialization...");
         let settings = init_vad_settings.lock().unwrap().clone();
-        let preferred = if init_active_model.is_empty() { None } else { Some(init_active_model.as_str()) };
+        let preferred = if init_active_model.is_empty() {
+            None
+        } else {
+            Some(init_active_model.as_str())
+        };
 
         // Write crash marker before loading model
         let marker_path = std::path::Path::new(&init_model_path).join(".model_loading");
@@ -430,18 +497,29 @@ pub fn run() {
         }
         let _ = std::fs::write(&marker_path, &init_active_model);
 
-        match build_models(&init_model_path, &settings, preferred, init_hotwords_file_path) {
+        match build_models(
+            &init_model_path,
+            &settings,
+            preferred,
+            init_hotwords_file_path,
+        ) {
             Ok((rec, vad, threads, model_name)) => {
                 // Model loaded successfully — remove crash marker
                 let _ = std::fs::remove_file(&marker_path);
 
                 log::info!("[init] models ready, num_threads={threads}, active_model={model_name}");
-                let r_ok = init_recognizer.lock().map(|mut r| {
-                    *r = Some(rec);
-                }).is_ok();
-                let v_ok = init_vad.lock().map(|mut v| {
-                    *v = Some(vad);
-                }).is_ok();
+                let r_ok = init_recognizer
+                    .lock()
+                    .map(|mut r| {
+                        *r = Some(rec);
+                    })
+                    .is_ok();
+                let v_ok = init_vad
+                    .lock()
+                    .map(|mut v| {
+                        *v = Some(vad);
+                    })
+                    .is_ok();
                 if r_ok && v_ok {
                     init_num_threads.store(threads, Ordering::Relaxed);
                     // Update active_model if it differs from config (e.g., fallback occurred)
@@ -451,7 +529,11 @@ pub fn run() {
                     // Persist the actual model to config file
                     let mut cfg = AppConfig::load();
                     if cfg.active_model != model_name {
-                        log::info!("[init] updating active_model from {} to {}", cfg.active_model, model_name);
+                        log::info!(
+                            "[init] updating active_model from {} to {}",
+                            cfg.active_model,
+                            model_name
+                        );
                         cfg.active_model = model_name;
                         let _ = AppConfig::save(&cfg);
                     }
@@ -480,6 +562,7 @@ pub fn run() {
     let active_ocr_model = initial_config.active_ocr_model.clone();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(
             tauri_plugin_log::Builder::new()
                 .targets([
@@ -563,6 +646,9 @@ pub fn run() {
             // OCR 命令
             commands::ocr::ocr_recognize,
             commands::ocr::ocr_recognize_bytes,
+            commands::ocr::capture_screenshot,
+            commands::ocr::ocr_screenshot_region,
+            commands::ocr::copy_text_to_clipboard,
             commands::ocr::ocr_get_active_model,
             commands::ocr::ocr_set_active_model,
             commands::ocr::ocr_release,
@@ -578,8 +664,14 @@ pub fn run() {
                 use tauri::DragDropEvent;
                 match taura_drop_event {
                     DragDropEvent::Drop { paths, .. } => {
-                        let path_list: Vec<String> = paths.iter().map(|p| p.to_string_lossy().to_string()).collect();
-                        let _ = window.emit("tauri://file-drop", serde_json::to_string(&path_list).unwrap_or_default());
+                        let path_list: Vec<String> = paths
+                            .iter()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .collect();
+                        let _ = window.emit(
+                            "tauri://file-drop",
+                            serde_json::to_string(&path_list).unwrap_or_default(),
+                        );
                         log::info!("Files dropped: {:?}", path_list);
                     }
                     DragDropEvent::Enter { .. } => {

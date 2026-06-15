@@ -9,9 +9,7 @@ use tauri::State;
 
 /// Returns the full dictionary configuration.
 #[tauri::command]
-pub fn get_dictionary_config(
-    state: State<'_, AppState>,
-) -> Result<DictionaryConfig, String> {
+pub fn get_dictionary_config(state: State<'_, AppState>) -> Result<DictionaryConfig, String> {
     let config = state.dictionary_config.lock().map_err(|e| e.to_string())?;
     Ok(config.clone())
 }
@@ -79,7 +77,9 @@ pub fn save_hotwords(
             let mut hwp = state.hotwords_file_path.lock().map_err(|e| e.to_string())?;
             *hwp = None;
         }
-        return Err(format!("模型重建失败: {e}。热词配置已回滚，请检查模型兼容性。"));
+        return Err(format!(
+            "模型重建失败: {e}。热词配置已回滚，请检查模型兼容性。"
+        ));
     }
 
     log::info!("[save_hotwords] model rebuilt with hotwords");
@@ -92,7 +92,10 @@ pub fn save_replacements(
     state: State<'_, AppState>,
     replacements: Vec<crate::config::dictionary_config::ReplacementEntry>,
 ) -> Result<(), String> {
-    log::info!("[save_replacements] saving {} replacements", replacements.len());
+    log::info!(
+        "[save_replacements] saving {} replacements",
+        replacements.len()
+    );
 
     let mut config = state.dictionary_config.lock().map_err(|e| e.to_string())?;
     config.replacements = replacements;
@@ -104,9 +107,7 @@ pub fn save_replacements(
 
 /// Get the current hotwords file path.
 #[tauri::command]
-pub fn get_hotwords_file_path(
-    state: State<'_, AppState>,
-) -> Result<Option<String>, String> {
+pub fn get_hotwords_file_path(state: State<'_, AppState>) -> Result<Option<String>, String> {
     let hwp = state.hotwords_file_path.lock().map_err(|e| e.to_string())?;
     Ok(hwp.clone())
 }
@@ -121,8 +122,16 @@ fn rebuild_recognizer(state: &State<'_, AppState>, hotwords_path: &str) -> Resul
         config.model_path.clone()
     };
 
-    let active_model = state.active_model.lock().map_err(|e| e.to_string())?.clone();
-    let vad_settings = state.vad_settings.lock().map_err(|e| e.to_string())?.clone();
+    let active_model = state
+        .active_model
+        .lock()
+        .map_err(|e| e.to_string())?
+        .clone();
+    let vad_settings = state
+        .vad_settings
+        .lock()
+        .map_err(|e| e.to_string())?
+        .clone();
 
     log::info!(
         "[rebuild_recognizer] model={}, hotwords={}",
@@ -131,7 +140,11 @@ fn rebuild_recognizer(state: &State<'_, AppState>, hotwords_path: &str) -> Resul
     );
 
     // Build new recognizer with updated hotwords
-    let preferred = if active_model.is_empty() { None } else { Some(active_model.as_str()) };
+    let preferred = if active_model.is_empty() {
+        None
+    } else {
+        Some(active_model.as_str())
+    };
     let (rec, _vad, _threads, model_name) = crate::build_models(
         &model_path,
         &vad_settings,

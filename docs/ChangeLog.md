@@ -23,9 +23,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Model settings page redesigned with dropdown selection**: ASR and OCR models are now selected via dropdown menus instead of individual cards. Each dropdown shows model installation status and provides context-aware action buttons (Download / Switch & Restart / Active badge). The layout is cleaner and more compact.
 - **PP-OCR V4/V5/V6 model archives now include `dict.txt`**: the zip files for all three models include character dictionary files. V4 uses PaddleOCR standard `ppocr_keys_v1.txt` (6623 chars), V5/V6 dictionaries sourced from [OnnxOCR](https://github.com/jingsongliujing/OnnxOCR). The model downloader also extracts `dict.txt` alongside the ONNX model files.
 - **`zip` crate upgraded from 0.6 to 2.x**: with `deflate` and `xz` features to support xz-compressed zip archives (e.g., snow-shot's `rapid_ocr.zip` using method 95). No breaking API changes since only `ZipArchive::new` was used for reading.
+- **Sidebar navigation reorganized**: "Dictionary" moved from the Features section to the Settings section (above "About"), grouping it with Settings, Model Management, and About as a configuration-related item.
 
 ### Added
 - **PP-OCRv6 ONNX model downloader script** (`tools/download_ppocr_v6.py`): Python script to download pre-converted PP-OCRv6 ONNX models directly from ModelScope (魔搭社区, `https://www.modelscope.cn/collections/PaddlePaddle/PP-OCRv6`). Downloads `PP-OCRv6_small_det_onnx` (detection, 9.4MB) and `PP-OCRv6_small_rec_onnx` (recognition, 20.2MB) from official PaddlePaddle ModelScope repositories. Classification model (`cls.onnx`) reused from PP-OCRv4/V5. Note: the `inference.yml` file shipped alongside the ModelScope ONNX model is not needed by `paddle-ocr-rs` (it uses its own built-in preprocessing config).
+- **Screenshot OCR**: capture the entire primary monitor, then select a region by dragging for OCR. Available via a "Screenshot OCR" button in the OCR page toolbar or a configurable keyboard shortcut (default `Ctrl+Shift+O`). The screenshot overlay supports drag-to-select region, ESC to cancel, and a processing indicator. OCR results are automatically copied to the clipboard.
+- **Screenshot OCR shortcut configuration**: the keyboard shortcut for screenshot OCR is now configurable in the Settings page with an interactive key recorder. Click the shortcut box to enter recording mode, then press the desired key combination. Built-in conflict detection warns when the shortcut conflicts with system shortcuts (Ctrl+C, Ctrl+V, Alt+Tab, etc.). The shortcut is persisted in `AppConfig.ocrScreenshotShortcut`.
+- **OCR completion Toast**: displays a toast notification after OCR recognition completes, showing the number of text blocks detected and the total processing time in milliseconds. Uses `total_time_ms` field in `OcrResult`.
+- **Raw RGBA OCR optimization**: `recognize_from_raw_rgba` method on `OcrEngine` bypasses PNG encoding/decoding for screenshot OCR. The `ocr_screenshot` command now passes raw RGBA pixel data directly from `xcap` capture to the OCR engine, avoiding the overhead of PNG compression and decompression. References snow-shot's SharedBuffer zero-copy approach.
+- **OCR optimization summary document**: `docs/OCR优化总结.md` documents all OCR performance optimizations in Chinese, covering model loading, ONNX inference, image preprocessing, dictionary correction, and feature optimizations.
+- **Rust clipboard command**: `copy_text_to_clipboard` command uses `arboard` crate directly to write text to the system clipboard, avoiding the "Document is not focused" error that occurs with the browser Clipboard API. Applied to both screenshot OCR auto-copy and manual copy button.
+
+### Changed
+- **OCR page renamed to "Text Recognition" (文本识别)**: sidebar navigation label and page header changed from "OCR" to "Text Recognition" in both Chinese and English locales.
 
 ## [v0.1.3] - 2026-06-14
 

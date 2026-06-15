@@ -67,6 +67,7 @@ export interface AppConfig {
   ffmpegPath: string | null;
   activeModel: string;
   sidebarCollapsed: boolean;
+  ocrScreenshotShortcut: string;
 }
 
 /** 模型下载进度 */
@@ -194,4 +195,10 @@ export interface OcrTextBlock {
 export interface OcrResult {
   textBlocks: OcrTextBlock[];
   totalTimeMs: number;
+}
+
+export interface ScreenshotCapture {
+  imagePath: string;
+  width: number;
+  height: number;
 }

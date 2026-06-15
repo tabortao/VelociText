@@ -167,16 +167,15 @@ impl OcrEngine {
         let (det_path, rec_path, cls_path) = Self::model_paths(model_dir);
         let dict_path = model_dir.join("dict.txt");
 
-        let det_data = std::fs::read(&det_path).map_err(|e| {
-            AppError::Ocr(format!("Failed to read det model: {e}"))
-        })?;
-        let rec_data = std::fs::read(&rec_path).map_err(|e| {
-            AppError::Ocr(format!("Failed to read rec model: {e}"))
-        })?;
+        let det_data = std::fs::read(&det_path)
+            .map_err(|e| AppError::Ocr(format!("Failed to read det model: {e}")))?;
+        let rec_data = std::fs::read(&rec_path)
+            .map_err(|e| AppError::Ocr(format!("Failed to read rec model: {e}")))?;
         let cls_data = if cls_path.exists() {
-            Some(std::fs::read(&cls_path).map_err(|e| {
-                AppError::Ocr(format!("Failed to read cls model: {e}"))
-            })?)
+            Some(
+                std::fs::read(&cls_path)
+                    .map_err(|e| AppError::Ocr(format!("Failed to read cls model: {e}")))?,
+            )
         } else {
             None
         };
@@ -206,21 +205,15 @@ impl OcrEngine {
             )
             .map_err(|e| AppError::Ocr(format!("Failed to init OCR models with dict: {e}")))?;
         } else if let Some(ref cls_bytes) = cls_data {
-            ocr.init_models_from_memory_custom(
-                &det_data,
-                cls_bytes,
-                &rec_data,
-                build_ocr_session,
-            )
-            .map_err(|e| AppError::Ocr(format!("Failed to init OCR models from memory: {e}")))?;
+            ocr.init_models_from_memory_custom(&det_data, cls_bytes, &rec_data, build_ocr_session)
+                .map_err(|e| {
+                    AppError::Ocr(format!("Failed to init OCR models from memory: {e}"))
+                })?;
         } else {
-            ocr.init_models_from_memory_custom(
-                &det_data,
-                &[],
-                &rec_data,
-                build_ocr_session,
-            )
-            .map_err(|e| AppError::Ocr(format!("Failed to init OCR models from memory: {e}")))?;
+            ocr.init_models_from_memory_custom(&det_data, &[], &rec_data, build_ocr_session)
+                .map_err(|e| {
+                    AppError::Ocr(format!("Failed to init OCR models from memory: {e}"))
+                })?;
         }
 
         Ok(Self {
@@ -272,26 +265,20 @@ impl OcrEngine {
             self.inner = ocr;
         } else {
             // V4: re-init from cached model data
-            let det_data = self.det_model_data.as_ref()
+            let det_data = self
+                .det_model_data
+                .as_ref()
                 .ok_or_else(|| AppError::Ocr("Det model data not cached".into()))?;
-            let rec_data = self.rec_model_data.as_ref()
+            let rec_data = self
+                .rec_model_data
+                .as_ref()
                 .ok_or_else(|| AppError::Ocr("Rec model data not cached".into()))?;
 
             let mut ocr = OcrLite::new();
             if let Some(ref cls_bytes) = self.cls_model_data {
-                ocr.init_models_from_memory_custom(
-                    det_data,
-                    cls_bytes,
-                    rec_data,
-                    build_ocr_session,
-                )
+                ocr.init_models_from_memory_custom(det_data, cls_bytes, rec_data, build_ocr_session)
             } else {
-                ocr.init_models_from_memory_custom(
-                    det_data,
-                    &[],
-                    rec_data,
-                    build_ocr_session,
-                )
+                ocr.init_models_from_memory_custom(det_data, &[], rec_data, build_ocr_session)
             }
             .map_err(|e| AppError::Ocr(format!("Failed to re-init OCR session: {e}")))?;
 
@@ -324,6 +311,8 @@ impl OcrEngine {
         img: &image::DynamicImage,
         scale_factor: f32,
     ) -> AppResult<OcrResult> {
+        let start = std::time::Instant::now();
+
         let mut image = img.clone();
         let effective_scale = scale_factor;
 
@@ -358,14 +347,14 @@ impl OcrEngine {
             .inner
             .detect_angle_rollback(
                 &image_buffer,
-                50,        // padding
-                max_size,  // max side len
-                0.5,       // box score threshold
-                0.3,       // box threshold
-                1.6,       // unclip ratio
-                true,      // do angle classification
-                false,     // most angle (only 0/180)
-                0.9,       // rollback threshold (snow-shot: 0.9)
+                50,       // padding
+                max_size, // max side len
+                0.5,      // box score threshold
+                0.3,      // box threshold
+                1.6,      // unclip ratio
+                true,     // do angle classification
+                false,    // most angle (only 0/180)
+                0.9,      // rollback threshold (snow-shot: 0.9)
             )
             .map_err(|e| AppError::Ocr(format!("OCR recognition failed: {e}")))?;
 
@@ -385,7 +374,7 @@ impl OcrEngine {
 
         Ok(OcrResult {
             text_blocks,
-            total_time_ms: 0,
+            total_time_ms: start.elapsed().as_millis() as u64,
         })
     }
 
@@ -394,5 +383,57 @@ impl OcrEngine {
         let img = image::load_from_memory(data)
             .map_err(|e| AppError::Ocr(format!("Failed to decode image: {e}")))?;
         self.recognize_from_image(&img, 1.0)
+    }
+
+    /// Run OCR on raw RGBA pixel data (bypasses PNG encode/decode).
+    /// Optimized for screenshot OCR where raw pixel data is already available.
+    /// References snow-shot's SharedBuffer zero-copy approach.
+    pub fn recognize_from_raw_rgba(
+        &mut self,
+        rgba_data: &[u8],
+        width: u32,
+        height: u32,
+    ) -> AppResult<OcrResult> {
+        let start = std::time::Instant::now();
+
+        let rgb_data = convert_rgba_to_rgb(rgba_data);
+        let image_buffer = image::RgbImage::from_raw(width, height, rgb_data)
+            .ok_or_else(|| AppError::Ocr("Failed to create RGB image from raw data".into()))?;
+
+        let max_size = height.max(width);
+
+        let result = self
+            .inner
+            .detect_angle_rollback(
+                &image_buffer,
+                50,
+                max_size,
+                0.5,
+                0.3,
+                1.6,
+                true,
+                false,
+                0.9,
+            )
+            .map_err(|e| AppError::Ocr(format!("OCR recognition failed: {e}")))?;
+
+        let text_blocks: Vec<TextBlockInfo> = result
+            .text_blocks
+            .iter()
+            .map(|block| TextBlockInfo {
+                text: block.text.clone(),
+                confidence: block.text_score,
+                box_points: block
+                    .box_points
+                    .iter()
+                    .map(|p| [p.x as f32, p.y as f32])
+                    .collect(),
+            })
+            .collect();
+
+        Ok(OcrResult {
+            text_blocks,
+            total_time_ms: start.elapsed().as_millis() as u64,
+        })
     }
 }

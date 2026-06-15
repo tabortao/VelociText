@@ -8,7 +8,9 @@ use tauri::State;
 
 /// Get the history file path from app data directory
 fn history_file_path(config: &crate::config::app_config::AppConfig) -> PathBuf {
-    let base = std::path::Path::new(&config.model_path).parent().unwrap_or(std::path::Path::new("."));
+    let base = std::path::Path::new(&config.model_path)
+        .parent()
+        .unwrap_or(std::path::Path::new("."));
     base.join("history.json")
 }
 
@@ -32,9 +34,7 @@ fn save_history_file(path: &std::path::Path, entries: &[HistoryEntry]) -> Result
 
 /// Get all history entries
 #[tauri::command]
-pub async fn get_history(
-    state: State<'_, AppState>,
-) -> Result<Vec<HistoryEntry>, String> {
+pub async fn get_history(state: State<'_, AppState>) -> Result<Vec<HistoryEntry>, String> {
     let config = state.config.lock().map_err(|e| e.to_string())?;
     let path = history_file_path(&config);
     Ok(load_history_file(&path))
@@ -42,10 +42,7 @@ pub async fn get_history(
 
 /// Save a history entry
 #[tauri::command]
-pub async fn save_history(
-    state: State<'_, AppState>,
-    entry: HistoryEntry,
-) -> Result<(), String> {
+pub async fn save_history(state: State<'_, AppState>, entry: HistoryEntry) -> Result<(), String> {
     let config = state.config.lock().map_err(|e| e.to_string())?;
     let path = history_file_path(&config);
     let mut entries = load_history_file(&path);
@@ -64,10 +61,7 @@ pub async fn save_history(
 
 /// Delete a history entry by id
 #[tauri::command]
-pub async fn delete_history(
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<(), String> {
+pub async fn delete_history(state: State<'_, AppState>, id: String) -> Result<(), String> {
     let config = state.config.lock().map_err(|e| e.to_string())?;
     let path = history_file_path(&config);
     let mut entries = load_history_file(&path);
@@ -77,9 +71,7 @@ pub async fn delete_history(
 
 /// Clear all history
 #[tauri::command]
-pub async fn clear_history(
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn clear_history(state: State<'_, AppState>) -> Result<(), String> {
     let config = state.config.lock().map_err(|e| e.to_string())?;
     let path = history_file_path(&config);
     save_history_file(&path, &[])

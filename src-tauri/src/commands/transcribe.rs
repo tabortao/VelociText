@@ -4,7 +4,9 @@ use crate::engine::model_manager::ModelManager;
 use crate::engine::recognizer_factory::{ModelType, RecognizerConfig, RecognizerFactory};
 use crate::engine::transcription_pipeline::{run_recognition, SegmentResult, VadSettings};
 use crate::engine::vad::detect_speech_segments;
-use crate::models::task::{BatchFileResult, BatchResult, TranscribeOptions, TranscribeResult, TranscribeSegment};
+use crate::models::task::{
+    BatchFileResult, BatchResult, TranscribeOptions, TranscribeResult, TranscribeSegment,
+};
 use crate::AppState;
 use serde::Serialize;
 use std::sync::atomic::Ordering;
@@ -37,13 +39,11 @@ pub async fn transcribe_file(
     let model_type = options
         .model_type
         .as_deref()
-        .map(|s| {
-            match s {
-                "paraformer" => ModelType::Paraformer,
-                "zipformer-ctc" => ModelType::ZipformerCtc,
-                "transducer" => ModelType::Transducer,
-                _ => ModelType::SenseVoice,
-            }
+        .map(|s| match s {
+            "paraformer" => ModelType::Paraformer,
+            "zipformer-ctc" => ModelType::ZipformerCtc,
+            "transducer" => ModelType::Transducer,
+            _ => ModelType::SenseVoice,
         })
         .unwrap_or(ModelType::SenseVoice);
 
@@ -73,158 +73,174 @@ pub async fn transcribe_file(
     let emit_handle = app_handle.clone();
 
     // Execute transcription in spawn_blocking
-    let handle = tokio::task::spawn_blocking(move || -> Result<(Vec<TranscribeSegment>, f64), String> {
-        use crate::engine::audio_extractor::extract_audio;
-        use tempfile::NamedTempFile;
+    let handle =
+        tokio::task::spawn_blocking(move || -> Result<(Vec<TranscribeSegment>, f64), String> {
+            use crate::engine::audio_extractor::extract_audio;
+            use tempfile::NamedTempFile;
 
-        // 1. Extract audio
-        tx.blocking_send(ProgressPayload {
-            percent: 10,
-            stage: "extracting".into(),
-            message: "extracting_audio".into(),
-        }).ok();
-
-        let temp_wav = NamedTempFile::new().map_err(|e| e.to_string())?;
-        let wav_path = temp_wav.path().to_string_lossy().to_string();
-        let duration = extract_audio(&file_path, &wav_path).map_err(|e| e.to_string())?;
-
-        // Create recognizer
-        let factory_config = RecognizerConfig {
-            model_dir: model_dir_clone,
-            num_threads: 4,
-            hotwords_file,
-            hotwords_score: 1.5,
-            use_itn: true,
-        };
-
-        let recognizer = RecognizerFactory::create(&model_type, &factory_config)
-            .map_err(|e| e.to_string())?;
-
-        // 2. Speech recognition — with or without VAD
-        if use_vad {
-            // Build silero-vad model path: {models_dir}/silero-vad/model.onnx
-            let vad_model_path = std::path::Path::new(&vad_model_dir)
-                .parent()
-                .map(|p| p.join("silero-vad").join("model.onnx"))
-                .unwrap_or_else(|| {
-                    std::path::Path::new(&vad_model_dir).join("silero-vad").join("model.onnx")
-                });
-            let vad_model_path_str = vad_model_path.to_string_lossy().to_string();
-
-            // Always do full audio ASR first (most reliable)
+            // 1. Extract audio
             tx.blocking_send(ProgressPayload {
-                percent: 30,
-                stage: "transcribing".into(),
-                message: "transcribing_full".into(),
-            }).ok();
+                percent: 10,
+                stage: "extracting".into(),
+                message: "extracting_audio".into(),
+            })
+            .ok();
 
-            let audio = sherpa_onnx::Wave::read(&wav_path)
-                .ok_or_else(|| format!("Failed to read WAV: {}", wav_path))?;
-            let stream = recognizer.create_stream();
-            stream.accept_waveform(audio.sample_rate(), audio.samples());
-            recognizer.decode(&stream);
-            let full_text = stream.get_result().map(|r| r.text).unwrap_or_default();
+            let temp_wav = NamedTempFile::new().map_err(|e| e.to_string())?;
+            let wav_path = temp_wav.path().to_string_lossy().to_string();
+            let duration = extract_audio(&file_path, &wav_path).map_err(|e| e.to_string())?;
 
-            // Try VAD for time-aligned segmentation
-            tx.blocking_send(ProgressPayload {
-                percent: 60,
-                stage: "vad".into(),
-                message: "vad_detecting".into(),
-            }).ok();
+            // Create recognizer
+            let factory_config = RecognizerConfig {
+                model_dir: model_dir_clone,
+                num_threads: 4,
+                hotwords_file,
+                hotwords_score: 1.5,
+                use_itn: true,
+            };
 
-            let vad_result = detect_speech_segments(&wav_path, &vad_model_path_str);
+            let recognizer = RecognizerFactory::create(&model_type, &factory_config)
+                .map_err(|e| e.to_string())?;
 
-            match vad_result {
-                Ok((vad_segments, _)) if !vad_segments.is_empty() => {
-                    // Distribute full text across VAD segments proportionally
-                    let total_chars = full_text.chars().count();
-                    if total_chars > 0 {
-                        let mut recognized_segments: Vec<TranscribeSegment> = Vec::new();
-                        let mut char_offset = 0;
+            // 2. Speech recognition — with or without VAD
+            if use_vad {
+                // Build silero-vad model path: {models_dir}/silero-vad/model.onnx
+                let vad_model_path = std::path::Path::new(&vad_model_dir)
+                    .parent()
+                    .map(|p| p.join("silero-vad").join("model.onnx"))
+                    .unwrap_or_else(|| {
+                        std::path::Path::new(&vad_model_dir)
+                            .join("silero-vad")
+                            .join("model.onnx")
+                    });
+                let vad_model_path_str = vad_model_path.to_string_lossy().to_string();
 
-                        let total_vad_duration: f64 = vad_segments.iter()
-                            .map(|s| s.end - s.start)
-                            .sum();
+                // Always do full audio ASR first (most reliable)
+                tx.blocking_send(ProgressPayload {
+                    percent: 30,
+                    stage: "transcribing".into(),
+                    message: "transcribing_full".into(),
+                })
+                .ok();
 
-                        for vad_seg in &vad_segments {
-                            let seg_duration = vad_seg.end - vad_seg.start;
-                            let ratio = if total_vad_duration > 0.0 { seg_duration / total_vad_duration } else { 0.0 };
-                            let seg_chars = (total_chars as f64 * ratio).ceil() as usize;
-                            let seg_chars = seg_chars.min(total_chars - char_offset);
-                            if seg_chars == 0 {
-                                break;
-                            }
-                            let seg_text: String = full_text.chars()
-                                .skip(char_offset)
-                                .take(seg_chars)
-                                .collect();
-                            char_offset += seg_chars;
+                let audio = sherpa_onnx::Wave::read(&wav_path)
+                    .ok_or_else(|| format!("Failed to read WAV: {}", wav_path))?;
+                let stream = recognizer.create_stream();
+                stream.accept_waveform(audio.sample_rate(), audio.samples());
+                recognizer.decode(&stream);
+                let full_text = stream.get_result().map(|r| r.text).unwrap_or_default();
 
-                            // Apply smart sentence segmentation within this VAD segment
-                            let sub_segments = segment_text(&seg_text, seg_duration);
-                            for sub in sub_segments {
-                                if !sub.text.trim().is_empty() {
-                                    recognized_segments.push(TranscribeSegment {
-                                        start: vad_seg.start + sub.start,
-                                        end: vad_seg.start + sub.end,
-                                        text: sub.text,
-                                    });
+                // Try VAD for time-aligned segmentation
+                tx.blocking_send(ProgressPayload {
+                    percent: 60,
+                    stage: "vad".into(),
+                    message: "vad_detecting".into(),
+                })
+                .ok();
+
+                let vad_result = detect_speech_segments(&wav_path, &vad_model_path_str);
+
+                match vad_result {
+                    Ok((vad_segments, _)) if !vad_segments.is_empty() => {
+                        // Distribute full text across VAD segments proportionally
+                        let total_chars = full_text.chars().count();
+                        if total_chars > 0 {
+                            let mut recognized_segments: Vec<TranscribeSegment> = Vec::new();
+                            let mut char_offset = 0;
+
+                            let total_vad_duration: f64 =
+                                vad_segments.iter().map(|s| s.end - s.start).sum();
+
+                            for vad_seg in &vad_segments {
+                                let seg_duration = vad_seg.end - vad_seg.start;
+                                let ratio = if total_vad_duration > 0.0 {
+                                    seg_duration / total_vad_duration
+                                } else {
+                                    0.0
+                                };
+                                let seg_chars = (total_chars as f64 * ratio).ceil() as usize;
+                                let seg_chars = seg_chars.min(total_chars - char_offset);
+                                if seg_chars == 0 {
+                                    break;
+                                }
+                                let seg_text: String = full_text
+                                    .chars()
+                                    .skip(char_offset)
+                                    .take(seg_chars)
+                                    .collect();
+                                char_offset += seg_chars;
+
+                                // Apply smart sentence segmentation within this VAD segment
+                                let sub_segments = segment_text(&seg_text, seg_duration);
+                                for sub in sub_segments {
+                                    if !sub.text.trim().is_empty() {
+                                        recognized_segments.push(TranscribeSegment {
+                                            start: vad_seg.start + sub.start,
+                                            end: vad_seg.start + sub.end,
+                                            text: sub.text,
+                                        });
+                                    }
                                 }
                             }
+
+                            tx.blocking_send(ProgressPayload {
+                                percent: 95,
+                                stage: "done".into(),
+                                message: "transcribing_done".into(),
+                            })
+                            .ok();
+
+                            return Ok((recognized_segments, duration));
                         }
-
-                        tx.blocking_send(ProgressPayload {
-                            percent: 95,
-                            stage: "done".into(),
-                            message: "transcribing_done".into(),
-                        }).ok();
-
-                        return Ok((recognized_segments, duration));
+                    }
+                    _ => {
+                        // VAD failed or no segments, log and fall through
+                        log::warn!(
+                            "VAD failed or returned no segments, using text-based segmentation"
+                        );
                     }
                 }
-                _ => {
-                    // VAD failed or no segments, log and fall through
-                    log::warn!("VAD failed or returned no segments, using text-based segmentation");
-                }
+
+                // Fallback: use text-based segmentation
+                tx.blocking_send(ProgressPayload {
+                    percent: 85,
+                    stage: "segmenting".into(),
+                    message: "segmenting_text".into(),
+                })
+                .ok();
+
+                let segments = segment_text(&full_text, duration);
+                Ok((segments, duration))
+            } else {
+                // Full audio recognition with smart text segmentation
+                tx.blocking_send(ProgressPayload {
+                    percent: 40,
+                    stage: "transcribing".into(),
+                    message: "transcribing_full".into(),
+                })
+                .ok();
+
+                let audio = sherpa_onnx::Wave::read(&wav_path)
+                    .ok_or_else(|| format!("Failed to read WAV: {}", wav_path))?;
+                let stream = recognizer.create_stream();
+                stream.accept_waveform(audio.sample_rate(), audio.samples());
+                recognizer.decode(&stream);
+
+                let text = stream.get_result().map(|r| r.text).unwrap_or_default();
+
+                tx.blocking_send(ProgressPayload {
+                    percent: 85,
+                    stage: "segmenting".into(),
+                    message: "segmenting_text".into(),
+                })
+                .ok();
+
+                // Smart segmentation
+                let segments = segment_text(&text, duration);
+
+                Ok((segments, duration))
             }
-
-            // Fallback: use text-based segmentation
-            tx.blocking_send(ProgressPayload {
-                percent: 85,
-                stage: "segmenting".into(),
-                message: "segmenting_text".into(),
-            }).ok();
-
-            let segments = segment_text(&full_text, duration);
-            Ok((segments, duration))
-        } else {
-            // Full audio recognition with smart text segmentation
-            tx.blocking_send(ProgressPayload {
-                percent: 40,
-                stage: "transcribing".into(),
-                message: "transcribing_full".into(),
-            }).ok();
-
-            let audio = sherpa_onnx::Wave::read(&wav_path)
-                .ok_or_else(|| format!("Failed to read WAV: {}", wav_path))?;
-            let stream = recognizer.create_stream();
-            stream.accept_waveform(audio.sample_rate(), audio.samples());
-            recognizer.decode(&stream);
-
-            let text = stream.get_result().map(|r| r.text).unwrap_or_default();
-
-            tx.blocking_send(ProgressPayload {
-                percent: 85,
-                stage: "segmenting".into(),
-                message: "segmenting_text".into(),
-            }).ok();
-
-            // Smart segmentation
-            let segments = segment_text(&text, duration);
-
-            Ok((segments, duration))
-        }
-    });
+        });
 
     // Forward progress events to frontend
     let progress_task = tokio::spawn(async move {
@@ -243,12 +259,7 @@ pub async fn transcribe_file(
 
     let elapsed = start_time.elapsed();
 
-    emit_progress(
-        &app_handle,
-        100,
-        "done",
-        "transcribing_done",
-    );
+    emit_progress(&app_handle, 100, "done", "transcribing_done");
 
     Ok(TranscribeResult {
         segments,
@@ -378,8 +389,8 @@ pub async fn transcribe_batch(
         use crate::engine::audio_extractor::extract_audio;
         use tempfile::NamedTempFile;
 
-        let recognizer = RecognizerFactory::create(&model_type, &factory_config)
-            .map_err(|e| e.to_string())?;
+        let recognizer =
+            RecognizerFactory::create(&model_type, &factory_config).map_err(|e| e.to_string())?;
 
         let mut results = Vec::with_capacity(total);
         let mut succeeded = 0usize;
@@ -393,11 +404,16 @@ pub async fn transcribe_batch(
                 .unwrap_or_else(|| "unknown".into());
 
             let file_pct = ((i as f64 / total as f64) * 100.0) as u32;
-            emit_handle.emit("transcribe-progress", ProgressPayload {
-                percent: file_pct,
-                stage: "batch".into(),
-                message: "batch_processing".into(),
-            }).ok();
+            emit_handle
+                .emit(
+                    "transcribe-progress",
+                    ProgressPayload {
+                        percent: file_pct,
+                        stage: "batch".into(),
+                        message: "batch_processing".into(),
+                    },
+                )
+                .ok();
 
             let file_start = Instant::now();
 
@@ -446,11 +462,16 @@ pub async fn transcribe_batch(
             }
         }
 
-        emit_handle.emit("transcribe-progress", ProgressPayload {
-            percent: 100,
-            stage: "batch".into(),
-            message: "batch_complete".into(),
-        }).ok();
+        emit_handle
+            .emit(
+                "transcribe-progress",
+                ProgressPayload {
+                    percent: 100,
+                    stage: "batch".into(),
+                    message: "batch_complete".into(),
+                },
+            )
+            .ok();
 
         Ok(BatchResult {
             results,
@@ -477,9 +498,7 @@ pub async fn check_file_format(file_path: String) -> Result<bool, String> {
 
 /// Get available model types
 #[tauri::command]
-pub async fn get_model_types(
-    state: State<'_, AppState>,
-) -> Result<Vec<serde_json::Value>, String> {
+pub async fn get_model_types(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
     let config = state.config.lock().map_err(|e| e.to_string())?;
     let available = RecognizerFactory::list_available(&config.model_path);
 
@@ -526,7 +545,7 @@ pub async fn get_model_types(
 /// Initialization status response.
 #[derive(Debug, Clone, Serialize)]
 pub struct InitStatus {
-    status: u8,        // 0 = pending, 1 = ready, 2 = error
+    status: u8, // 0 = pending, 1 = ready, 2 = error
     error: String,
     #[serde(rename = "numThreads")]
     num_threads: u32,
@@ -549,7 +568,11 @@ pub struct ProcessingState {
 #[tauri::command]
 pub fn get_init_status(state: State<'_, AppState>) -> InitStatus {
     let status = state.init_status.load(Ordering::Relaxed);
-    let error = state.init_error.lock().map(|e| e.clone()).unwrap_or_default();
+    let error = state
+        .init_error
+        .lock()
+        .map(|e| e.clone())
+        .unwrap_or_default();
     let num_threads = state.num_threads.load(Ordering::Relaxed);
     InitStatus {
         status,
@@ -587,7 +610,10 @@ pub fn recognize_file(path: String, state: State<'_, AppState>) -> Result<(), St
     state.segments.lock().map_err(|e| e.to_string())?.clear();
     *state.audio_path.lock().map_err(|e| e.to_string())? = path.clone();
     *state.elapsed_secs.lock().map_err(|e| e.to_string())? = 0.0;
-    *state.audio_duration_secs.lock().map_err(|e| e.to_string())? = 0.0;
+    *state
+        .audio_duration_secs
+        .lock()
+        .map_err(|e| e.to_string())? = 0.0;
 
     // Clone Arc handles for the worker thread
     let recognizer = Arc::clone(&state.recognizer);
@@ -602,14 +628,7 @@ pub fn recognize_file(path: String, state: State<'_, AppState>) -> Result<(), St
 
     std::thread::spawn(move || {
         let start_time = Instant::now();
-        let result = run_recognition(
-            &path,
-            &recognizer,
-            &vad,
-            &cancelled,
-            &progress,
-            &segments,
-        );
+        let result = run_recognition(&path, &recognizer, &vad, &cancelled, &progress, &segments);
         let elapsed = start_time.elapsed().as_secs_f32();
 
         if let Ok(mut e) = elapsed_secs.lock() {
@@ -650,7 +669,10 @@ pub fn get_recognition_progress(state: State<'_, AppState>) -> Result<Processing
     let status = state.status.lock().map_err(|e| e.to_string())?.clone();
     let raw_segments = state.segments.lock().map_err(|e| e.to_string())?.clone();
     let elapsed_secs = *state.elapsed_secs.lock().map_err(|e| e.to_string())?;
-    let audio_duration_secs = *state.audio_duration_secs.lock().map_err(|e| e.to_string())?;
+    let audio_duration_secs = *state
+        .audio_duration_secs
+        .lock()
+        .map_err(|e| e.to_string())?;
 
     // Apply text replacements from dictionary config
     let segments: Vec<SegmentResult> = {
@@ -697,15 +719,19 @@ pub fn save_segment_as_wav(
         return Err("No audio file has been processed".to_string());
     }
 
-    let samples = audio_decoder::decode_time_range(&audio_path, start, end)
-        .map_err(|e| e.to_string())?;
+    let samples =
+        audio_decoder::decode_time_range(&audio_path, start, end).map_err(|e| e.to_string())?;
     audio_decoder::write_wav(&path, &samples).map_err(|e| e.to_string())
 }
 
 /// Get current VAD settings.
 #[tauri::command]
 pub fn get_vad_settings(state: State<'_, AppState>) -> Result<VadSettings, String> {
-    state.vad_settings.lock().map(|s| s.clone()).map_err(|e| e.to_string())
+    state
+        .vad_settings
+        .lock()
+        .map(|s| s.clone())
+        .map_err(|e| e.to_string())
 }
 
 /// Apply new VAD settings (reloads models in background).
@@ -765,7 +791,11 @@ pub fn apply_vad_settings(
     let init_error = Arc::clone(&state.init_error);
     let init_num_threads = Arc::clone(&state.num_threads);
     let active_model_arc = Arc::clone(&state.active_model);
-    let hotwords_file = state.hotwords_file_path.lock().map(|h| h.clone()).unwrap_or(None);
+    let hotwords_file = state
+        .hotwords_file_path
+        .lock()
+        .map(|h| h.clone())
+        .unwrap_or(None);
     let model_path = {
         let config = state.config.lock().map_err(|e| e.to_string())?;
         config.model_path.clone()
@@ -773,13 +803,30 @@ pub fn apply_vad_settings(
 
     std::thread::spawn(move || {
         log::info!("[apply_settings] rebuilding models with new settings...");
-        let active = active_model_arc.lock().map(|a| a.clone()).unwrap_or_default();
-        let preferred = if active.is_empty() { None } else { Some(active.as_str()) };
+        let active = active_model_arc
+            .lock()
+            .map(|a| a.clone())
+            .unwrap_or_default();
+        let preferred = if active.is_empty() {
+            None
+        } else {
+            Some(active.as_str())
+        };
         match crate::build_models(&model_path, &new_settings, preferred, hotwords_file) {
             Ok((rec, vad, threads, model_name)) => {
                 log::info!("[apply_settings] models rebuilt, num_threads={threads}, active_model={model_name}");
-                let r_ok = recognizer_arc.lock().map(|mut r| { *r = Some(rec); }).is_ok();
-                let v_ok = vad_arc.lock().map(|mut v| { *v = Some(vad); }).is_ok();
+                let r_ok = recognizer_arc
+                    .lock()
+                    .map(|mut r| {
+                        *r = Some(rec);
+                    })
+                    .is_ok();
+                let v_ok = vad_arc
+                    .lock()
+                    .map(|mut v| {
+                        *v = Some(vad);
+                    })
+                    .is_ok();
                 if r_ok && v_ok {
                     init_num_threads.store(threads, Ordering::Relaxed);
                     init_status.store(1, Ordering::Relaxed);

@@ -11,8 +11,7 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 /// 支持的音频/视频格式
 const SUPPORTED_FORMATS: &[&str] = &[
-    "mp3", "wav", "flac", "ogg", "aac", "m4a", "aiff", "caf",
-    "mp4", "mov", "mkv", "webm",
+    "mp3", "wav", "flac", "ogg", "aac", "m4a", "aiff", "caf", "mp4", "mov", "mkv", "webm",
 ];
 
 /// 为 Command 设置后台运行（Windows 不弹黑窗）
@@ -29,8 +28,7 @@ pub fn check_ffmpeg() -> AppResult<String> {
     let mut cmd = Command::new("ffmpeg");
     cmd.arg("-version");
     hide_window(&mut cmd);
-    let output = cmd.output()
-        .map_err(|_| AppError::FfmpegNotFound)?;
+    let output = cmd.output().map_err(|_| AppError::FfmpegNotFound)?;
 
     if !output.status.success() {
         return Err(AppError::FfmpegNotFound);
@@ -72,13 +70,13 @@ pub fn extract_audio(input_path: &str, output_path: &str) -> AppResult<f64> {
         "-y",
         "-i",
         input_path,
-        "-vn",                 // 不要视频
+        "-vn", // 不要视频
         "-acodec",
-        "pcm_s16le",           // 16-bit PCM
+        "pcm_s16le", // 16-bit PCM
         "-ar",
-        "16000",               // 16kHz 采样率
+        "16000", // 16kHz 采样率
         "-ac",
-        "1",                   // Mono
+        "1", // Mono
         "-f",
         "wav",
         output_path,
@@ -112,18 +110,17 @@ fn get_audio_duration(file_path: &str) -> AppResult<f64> {
         file_path,
     ]);
     hide_window(&mut cmd);
-    let output = cmd.output()
-        .map_err(|_| {
-            // ffprobe 可能和 ffmpeg 一起安装，如果找不到则返回 0
-            log::warn!("ffprobe not found, using 0 as duration");
-        });
+    let output = cmd.output().map_err(|_| {
+        // ffprobe 可能和 ffmpeg 一起安装，如果找不到则返回 0
+        log::warn!("ffprobe not found, using 0 as duration");
+    });
 
     match output {
         Ok(out) if out.status.success() => {
             let dur_str = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            dur_str.parse::<f64>().map_err(|_| {
-                AppError::AudioExtraction("无法解析音频时长".into())
-            })
+            dur_str
+                .parse::<f64>()
+                .map_err(|_| AppError::AudioExtraction("无法解析音频时长".into()))
         }
         _ => Ok(0.0), // 无法获取时长时返回 0
     }

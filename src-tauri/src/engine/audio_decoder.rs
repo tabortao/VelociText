@@ -18,10 +18,12 @@ use symphonia::core::probe::Hint;
 pub fn open_audio_file(
     path: &str,
 ) -> AppResult<(Box<dyn FormatReader>, Box<dyn Decoder>, u32, usize, u32)> {
-    let src = File::open(path).map_err(|e| AppError::Io(std::io::Error::new(
-        std::io::ErrorKind::Other,
-        format!("Cannot open file: {e}"),
-    )))?;
+    let src = File::open(path).map_err(|e| {
+        AppError::Io(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("Cannot open file: {e}"),
+        ))
+    })?;
     let mss = MediaSourceStream::new(Box::new(src), Default::default());
 
     let mut hint = Hint::new();
@@ -60,15 +62,16 @@ pub fn open_audio_file(
                 track.id
             );
             if codec == CODEC_TYPE_NULL {
-                log::debug!("[open_audio_file] skip track {:?}: CODEC_TYPE_NULL", track.id);
+                log::debug!(
+                    "[open_audio_file] skip track {:?}: CODEC_TYPE_NULL",
+                    track.id
+                );
                 continue;
             }
 
             // Try to create a decoder — with audio-only symphonia features,
             // video codecs will fail here.
-            match symphonia::default::get_codecs()
-                .make(&track.codec_params, &Default::default())
-            {
+            match symphonia::default::get_codecs().make(&track.codec_params, &Default::default()) {
                 Ok(dec) => {
                     let sr = track.codec_params.sample_rate.unwrap_or(16000);
                     let ch = track.codec_params.channels.map(|c| c.count()).unwrap_or(1);
@@ -88,14 +91,17 @@ pub fn open_audio_file(
                 }
             }
         }
-        audio_track
-            .ok_or_else(|| {
-                log::error!(
-                    "[open_audio_file] no supported audio track. Tracks: {:?}",
-                    format.tracks().iter().map(|t| format!("{:?}: codec={:?}", t.id, t.codec_params.codec)).collect::<Vec<_>>()
-                );
-                AppError::UnsupportedFormat("No supported audio track found".into())
-            })?
+        audio_track.ok_or_else(|| {
+            log::error!(
+                "[open_audio_file] no supported audio track. Tracks: {:?}",
+                format
+                    .tracks()
+                    .iter()
+                    .map(|t| format!("{:?}: codec={:?}", t.id, t.codec_params.codec))
+                    .collect::<Vec<_>>()
+            );
+            AppError::UnsupportedFormat("No supported audio track found".into())
+        })?
     };
 
     let decoder = track_codec_params;
@@ -130,10 +136,9 @@ pub fn decode_to_mono_f32(decoded: &AudioBufferRef, num_channels: usize) -> Vec<
 pub fn create_resampler(native_rate: u32) -> AppResult<Option<LinearResampler>> {
     if native_rate != 16000 {
         Ok(Some(
-            LinearResampler::create(native_rate as i32, 16000)
-                .ok_or_else(|| AppError::Transcription(format!(
-                    "Failed to create resampler for {native_rate} Hz"
-                )))?,
+            LinearResampler::create(native_rate as i32, 16000).ok_or_else(|| {
+                AppError::Transcription(format!("Failed to create resampler for {native_rate} Hz"))
+            })?,
         ))
     } else {
         Ok(None)
@@ -147,23 +152,25 @@ pub fn write_wav(path: &str, samples: &[f32]) -> AppResult<()> {
     let data_size = num_samples * 2;
     let file_size = 36 + data_size;
 
-    let f = File::create(path)
-        .map_err(|e| AppError::Io(e))?;
+    let f = File::create(path).map_err(|e| AppError::Io(e))?;
     let mut w = std::io::BufWriter::new(f);
 
     w.write_all(b"RIFF").map_err(AppError::Io)?;
-    w.write_all(&file_size.to_le_bytes()).map_err(AppError::Io)?;
+    w.write_all(&file_size.to_le_bytes())
+        .map_err(AppError::Io)?;
     w.write_all(b"WAVE").map_err(AppError::Io)?;
     w.write_all(b"fmt ").map_err(AppError::Io)?;
     w.write_all(&16u32.to_le_bytes()).map_err(AppError::Io)?;
     w.write_all(&1u16.to_le_bytes()).map_err(AppError::Io)?;
     w.write_all(&1u16.to_le_bytes()).map_err(AppError::Io)?;
     w.write_all(&16000u32.to_le_bytes()).map_err(AppError::Io)?;
-    w.write_all(&byte_rate.to_le_bytes()).map_err(AppError::Io)?;
+    w.write_all(&byte_rate.to_le_bytes())
+        .map_err(AppError::Io)?;
     w.write_all(&2u16.to_le_bytes()).map_err(AppError::Io)?;
     w.write_all(&16u16.to_le_bytes()).map_err(AppError::Io)?;
     w.write_all(b"data").map_err(AppError::Io)?;
-    w.write_all(&data_size.to_le_bytes()).map_err(AppError::Io)?;
+    w.write_all(&data_size.to_le_bytes())
+        .map_err(AppError::Io)?;
     for &s in samples {
         let clamped = s.max(-1.0).min(1.0);
         let pcm = (clamped * 32767.0) as i16;

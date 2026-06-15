@@ -124,12 +124,22 @@ pub fn run_recognition(
         .and_then(|t| t.codec_params.n_frames)
         .map(|n| n as usize);
 
-    let mut recognizer_guard = recognizer.lock().map_err(|e| crate::errors::AppError::Transcription(e.to_string()))?;
+    let mut recognizer_guard = recognizer
+        .lock()
+        .map_err(|e| crate::errors::AppError::Transcription(e.to_string()))?;
     let recognizer = recognizer_guard
         .as_mut()
-        .ok_or(crate::errors::AppError::Transcription("Recognizer not initialized".into()))?;
-    let mut vad_guard = vad.lock().map_err(|e| crate::errors::AppError::Transcription(e.to_string()))?;
-    let vad = vad_guard.as_mut().ok_or(crate::errors::AppError::Transcription("VAD not initialized".into()))?;
+        .ok_or(crate::errors::AppError::Transcription(
+            "Recognizer not initialized".into(),
+        ))?;
+    let mut vad_guard = vad
+        .lock()
+        .map_err(|e| crate::errors::AppError::Transcription(e.to_string()))?;
+    let vad = vad_guard
+        .as_mut()
+        .ok_or(crate::errors::AppError::Transcription(
+            "VAD not initialized".into(),
+        ))?;
     vad.reset();
 
     let window_size: usize = 512;

@@ -1,7 +1,7 @@
 use crate::errors::{AppError, AppResult};
 use sherpa_onnx::{
-    OfflineModelConfig, OfflineRecognizer, OfflineRecognizerConfig,
-    OfflineSenseVoiceModelConfig, Wave,
+    OfflineModelConfig, OfflineRecognizer, OfflineRecognizerConfig, OfflineSenseVoiceModelConfig,
+    Wave,
 };
 use std::path::Path;
 use std::sync::Mutex;
@@ -62,9 +62,10 @@ impl Recognizer {
         let recognizer = OfflineRecognizer::create(&config)
             .ok_or_else(|| AppError::ModelLoad("无法创建识别器".into()))?;
 
-        let mut inner = self.inner.lock().map_err(|e| {
-            AppError::ModelLoad(format!("锁失败: {}", e))
-        })?;
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|e| AppError::ModelLoad(format!("锁失败: {}", e)))?;
         *inner = Some(recognizer);
 
         log::info!("SenseVoice-Small 模型加载成功");
@@ -73,17 +74,17 @@ impl Recognizer {
 
     /// 对 WAV 音频进行识别
     pub fn recognize_wav(&self, wav_path: &str) -> AppResult<String> {
-        let inner = self.inner.lock().map_err(|e| {
-            AppError::Transcription(format!("锁失败: {}", e))
-        })?;
+        let inner = self
+            .inner
+            .lock()
+            .map_err(|e| AppError::Transcription(format!("锁失败: {}", e)))?;
 
-        let recognizer = inner.as_ref().ok_or_else(|| {
-            AppError::Transcription("识别器未初始化".into())
-        })?;
+        let recognizer = inner
+            .as_ref()
+            .ok_or_else(|| AppError::Transcription("识别器未初始化".into()))?;
 
-        let audio = Wave::read(wav_path).ok_or_else(|| {
-            AppError::Transcription(format!("无法读取音频文件: {}", wav_path))
-        })?;
+        let audio = Wave::read(wav_path)
+            .ok_or_else(|| AppError::Transcription(format!("无法读取音频文件: {}", wav_path)))?;
 
         let stream = recognizer.create_stream();
         stream.accept_waveform(audio.sample_rate(), audio.samples());
@@ -91,10 +92,7 @@ impl Recognizer {
         // 离线识别：接受完音频后，调用一次 decode 即可得到结果
         recognizer.decode(&stream);
 
-        let result = stream
-            .get_result()
-            .map(|r| r.text)
-            .unwrap_or_default();
+        let result = stream.get_result().map(|r| r.text).unwrap_or_default();
 
         Ok(result)
     }

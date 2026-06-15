@@ -97,7 +97,10 @@ impl RecognizerFactory {
     /// Create a recognizer for the given model type with the provided config.
     ///
     /// Automatically discovers model files based on the model type's candidates.
-    pub fn create(model_type: &ModelType, config: &RecognizerConfig) -> AppResult<OfflineRecognizer> {
+    pub fn create(
+        model_type: &ModelType,
+        config: &RecognizerConfig,
+    ) -> AppResult<OfflineRecognizer> {
         let base = Path::new(&config.model_dir);
 
         // Find the first matching model file
@@ -123,7 +126,11 @@ impl RecognizerFactory {
         if !tokens_file.exists() {
             return Err(AppError::ModelLoad(format!(
                 "{} not found in: {}",
-                if matches!(model_type, ModelType::Qwen3Asr) { "tokenizer directory" } else { "tokens.txt" },
+                if matches!(model_type, ModelType::Qwen3Asr) {
+                    "tokenizer directory"
+                } else {
+                    "tokens.txt"
+                },
                 base.display()
             )));
         }
@@ -144,15 +151,21 @@ impl RecognizerFactory {
             ..Default::default()
         };
 
-        OfflineRecognizer::create(&recognizer_config)
-            .ok_or_else(|| AppError::ModelLoad(format!(
+        OfflineRecognizer::create(&recognizer_config).ok_or_else(|| {
+            AppError::ModelLoad(format!(
                 "Failed to create {} recognizer",
                 model_type.display_name()
-            )))
+            ))
+        })
     }
 
     /// Build the model-specific configuration.
-    fn build_model_config(model_type: &ModelType, model_file: &Path, base: &Path, config: &RecognizerConfig) -> OfflineModelConfig {
+    fn build_model_config(
+        model_type: &ModelType,
+        model_file: &Path,
+        base: &Path,
+        config: &RecognizerConfig,
+    ) -> OfflineModelConfig {
         let model_path = model_file.to_string_lossy().to_string();
         let _base_str = base.to_string_lossy().to_string();
         let tokens_path = base.join("tokens.txt").to_string_lossy().to_string();
@@ -182,7 +195,10 @@ impl RecognizerFactory {
 
             ModelType::Qwen3Asr => {
                 // Qwen3-ASR requires conv_frontend.onnx, encoder.int8.onnx, decoder.int8.onnx, and tokenizer/
-                let conv_frontend_path = base.join("conv_frontend.onnx").to_string_lossy().to_string();
+                let conv_frontend_path = base
+                    .join("conv_frontend.onnx")
+                    .to_string_lossy()
+                    .to_string();
                 let decoder_path = base.join("decoder.int8.onnx").to_string_lossy().to_string();
                 let tokenizer_dir = base.join("tokenizer").to_string_lossy().to_string();
 
@@ -202,7 +218,7 @@ impl RecognizerFactory {
                     num_threads: config.num_threads as i32,
                     ..Default::default()
                 }
-            },
+            }
 
             ModelType::ZipformerCtc => OfflineModelConfig {
                 zipformer_ctc: OfflineZipformerCtcModelConfig {
@@ -227,7 +243,7 @@ impl RecognizerFactory {
                     num_threads: config.num_threads as i32,
                     ..Default::default()
                 }
-            },
+            }
         }
     }
 
@@ -251,7 +267,8 @@ impl RecognizerFactory {
             .filter(|mt| {
                 let model_dir = dir.join(mt.dir_name());
                 model_dir.exists()
-                    && mt.model_file_candidates()
+                    && mt
+                        .model_file_candidates()
                         .iter()
                         .any(|name| model_dir.join(name).exists())
             })

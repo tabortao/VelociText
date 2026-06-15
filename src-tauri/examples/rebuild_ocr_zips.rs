@@ -29,7 +29,11 @@ fn main() {
         }
         let mut out_file = std::fs::File::create(&out_path).unwrap();
         std::io::copy(&mut entry, &mut out_file).unwrap();
-        println!("  Extracted: {} ({} bytes)", name, out_path.metadata().unwrap().len());
+        println!(
+            "  Extracted: {} ({} bytes)",
+            name,
+            out_path.metadata().unwrap().len()
+        );
     }
 
     // File paths in extracted directory

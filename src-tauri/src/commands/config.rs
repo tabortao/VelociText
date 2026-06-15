@@ -8,9 +8,7 @@ use tauri::{Emitter, State};
 
 /// 获取应用配置
 #[tauri::command]
-pub async fn get_app_config(
-    state: State<'_, AppState>,
-) -> Result<AppConfig, String> {
+pub async fn get_app_config(state: State<'_, AppState>) -> Result<AppConfig, String> {
     let config = state.config.lock().map_err(|e| e.to_string())?;
     Ok(config.clone())
 }
@@ -38,7 +36,7 @@ pub async fn get_languages() -> Result<Vec<Language>, String> {
 /// FFmpeg 下载进度事件
 #[derive(Debug, Clone, Serialize)]
 pub struct FfmpegDownloadProgress {
-    pub stage: String,       // "downloading" | "extracting" | "completed" | "error"
+    pub stage: String, // "downloading" | "extracting" | "completed" | "error"
     pub percentage: f64,
     pub message: String,
 }
@@ -72,11 +70,14 @@ pub async fn download_ffmpeg(
             let mut config = state.config.lock().map_err(|e| e.to_string())?;
             config.ffmpeg_path = Some(exe_path.clone());
         }
-        let _ = app_handle.emit("ffmpeg-download-progress", FfmpegDownloadProgress {
-            stage: "completed".into(),
-            percentage: 100.0,
-            message: "FFmpeg already installed".into(),
-        });
+        let _ = app_handle.emit(
+            "ffmpeg-download-progress",
+            FfmpegDownloadProgress {
+                stage: "completed".into(),
+                percentage: 100.0,
+                message: "FFmpeg already installed".into(),
+            },
+        );
         return Ok(exe_path);
     }
 
@@ -84,11 +85,14 @@ pub async fn download_ffmpeg(
 
     // 下载阶段
     {
-        let _ = app_handle.emit("ffmpeg-download-progress", FfmpegDownloadProgress {
-            stage: "downloading".into(),
-            percentage: 0.0,
-            message: "Downloading FFmpeg...".into(),
-        });
+        let _ = app_handle.emit(
+            "ffmpeg-download-progress",
+            FfmpegDownloadProgress {
+                stage: "downloading".into(),
+                percentage: 0.0,
+                message: "Downloading FFmpeg...".into(),
+            },
+        );
 
         let resp = ureq::get(FFMPEG_URL)
             .call()
@@ -118,23 +122,32 @@ pub async fn download_ffmpeg(
 
             if total > 0 {
                 let pct = (downloaded as f64 / total as f64) * 100.0;
-                let _ = app_handle.emit("ffmpeg-download-progress", FfmpegDownloadProgress {
-                    stage: "downloading".into(),
-                    percentage: pct,
-                    message: format!("Downloading... {:.1} MB / {:.1} MB",
-                        downloaded as f64 / 1048576.0, total as f64 / 1048576.0),
-                });
+                let _ = app_handle.emit(
+                    "ffmpeg-download-progress",
+                    FfmpegDownloadProgress {
+                        stage: "downloading".into(),
+                        percentage: pct,
+                        message: format!(
+                            "Downloading... {:.1} MB / {:.1} MB",
+                            downloaded as f64 / 1048576.0,
+                            total as f64 / 1048576.0
+                        ),
+                    },
+                );
             }
         }
     }
 
     // 解压阶段
     {
-        let _ = app_handle.emit("ffmpeg-download-progress", FfmpegDownloadProgress {
-            stage: "extracting".into(),
-            percentage: 0.0,
-            message: "Extracting FFmpeg...".into(),
-        });
+        let _ = app_handle.emit(
+            "ffmpeg-download-progress",
+            FfmpegDownloadProgress {
+                stage: "extracting".into(),
+                percentage: 0.0,
+                message: "Extracting FFmpeg...".into(),
+            },
+        );
 
         std::fs::create_dir_all(&ffmpeg_dir)
             .map_err(|e| format!("Failed to create directory: {}", e))?;
@@ -161,11 +174,14 @@ pub async fn download_ffmpeg(
         config.ffmpeg_path = Some(exe_path.clone());
     }
 
-    let _ = app_handle.emit("ffmpeg-download-progress", FfmpegDownloadProgress {
-        stage: "completed".into(),
-        percentage: 100.0,
-        message: "FFmpeg installed successfully!".into(),
-    });
+    let _ = app_handle.emit(
+        "ffmpeg-download-progress",
+        FfmpegDownloadProgress {
+            stage: "completed".into(),
+            percentage: 100.0,
+            message: "FFmpeg installed successfully!".into(),
+        },
+    );
 
     Ok(exe_path)
 }

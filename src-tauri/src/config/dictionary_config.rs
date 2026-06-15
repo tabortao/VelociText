@@ -46,17 +46,15 @@ impl DictionaryConfig {
         let path = Self::config_file_path();
         if path.exists() {
             match std::fs::read_to_string(&path) {
-                Ok(content) => {
-                    match serde_json::from_str(&content) {
-                        Ok(config) => {
-                            log::info!("[DictionaryConfig] loaded from {}", path.display());
-                            return config;
-                        }
-                        Err(e) => {
-                            log::warn!("[DictionaryConfig] failed to parse: {e}, using defaults");
-                        }
+                Ok(content) => match serde_json::from_str(&content) {
+                    Ok(config) => {
+                        log::info!("[DictionaryConfig] loaded from {}", path.display());
+                        return config;
                     }
-                }
+                    Err(e) => {
+                        log::warn!("[DictionaryConfig] failed to parse: {e}, using defaults");
+                    }
+                },
                 Err(e) => {
                     log::warn!("[DictionaryConfig] failed to read: {e}, using defaults");
                 }
@@ -72,10 +70,9 @@ impl DictionaryConfig {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("Failed to create config dir: {e}"))?;
         }
-        let content = serde_json::to_string_pretty(self)
-            .map_err(|e| format!("Failed to serialize: {e}"))?;
-        std::fs::write(&path, content)
-            .map_err(|e| format!("Failed to write config: {e}"))?;
+        let content =
+            serde_json::to_string_pretty(self).map_err(|e| format!("Failed to serialize: {e}"))?;
+        std::fs::write(&path, content).map_err(|e| format!("Failed to write config: {e}"))?;
         log::info!("[DictionaryConfig] saved to {}", path.display());
         Ok(())
     }
@@ -86,14 +83,12 @@ impl DictionaryConfig {
     pub fn generate_hotwords_file(&self) -> Result<String, String> {
         let path = Self::hotwords_file_path();
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create dir: {e}"))?;
+            std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create dir: {e}"))?;
         }
 
         if self.hotwords.is_empty() {
             // Write empty file on empty hotwords
-            std::fs::write(&path, "")
-                .map_err(|e| format!("Failed to write hotwords file: {e}"))?;
+            std::fs::write(&path, "").map_err(|e| format!("Failed to write hotwords file: {e}"))?;
         } else {
             let mut lines = String::new();
             for entry in &self.hotwords {
