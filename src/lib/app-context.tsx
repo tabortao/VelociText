@@ -200,6 +200,13 @@ const dict = {
     "ocr.screenshotBtn": "截图识别",
     "ocr.screenshotDesc": "截取屏幕区域并识别文字",
     "ocr.screenshotDone": "已复制到剪贴板",
+    "ocr.startBatch": "开始识别",
+    "ocr.retryFailed": "重试失败",
+    "ocr.batchProgress": "识别中 {current}/{total}",
+    "ocr.batchDone": "完成 {count} 张图片识别，耗时 {time}秒",
+    "ocr.copyAllText": "复制全部",
+    "ocr.batchExportDone": "已导出 {count} 个文件",
+    "ocr.pending": "等待识别",
   },
   en: {
     // Sidebar
@@ -397,6 +404,13 @@ const dict = {
     "ocr.screenshotBtn": "Screenshot OCR",
     "ocr.screenshotDesc": "Capture screen region and recognize text",
     "ocr.screenshotDone": "Copied to clipboard",
+    "ocr.startBatch": "Start OCR",
+    "ocr.retryFailed": "Retry Failed",
+    "ocr.batchProgress": "Processing {current}/{total}",
+    "ocr.batchDone": "Completed {count} images in {time}s",
+    "ocr.copyAllText": "Copy All",
+    "ocr.batchExportDone": "Exported {count} files",
+    "ocr.pending": "Pending",
   },
 }
 

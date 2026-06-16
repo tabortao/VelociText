@@ -696,9 +696,12 @@ pub fn run() {
                         // Trigger screenshot via invoke
                         let app = app_handle.clone();
                         tauri::async_runtime::spawn(async move {
+                            // Only show window if it's currently visible (not minimized to tray)
+                            // When minimized to tray, do screenshot silently without showing the window
                             if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.set_focus();
+                                if window.is_visible().unwrap_or(false) {
+                                    let _ = window.set_focus();
+                                }
                             }
                             // Emit event to frontend to trigger screenshot
                             let _ = app.emit("trigger-screenshot-ocr", ());

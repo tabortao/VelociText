@@ -18,8 +18,9 @@ import {
   SettingsIcon,
   SaveIcon,
 } from "lucide-react"
-import { convertFileSrc } from "@tauri-apps/api/core"
+import { convertFileSrc, invoke } from "@tauri-apps/api/core"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
+import { open, save } from "@tauri-apps/plugin-dialog"
 import { useAppContext } from "@/lib/app-context"
 import type { StreamingSegment, ProcessingState, InitStatus, VadSettings } from "@/types"
 
@@ -142,7 +143,6 @@ export function TranscribePage() {
   const startInitPolling = useCallback(() => {
     const poll = setInterval(async () => {
       try {
-        const { invoke } = await import("@tauri-apps/api/core")
         const res = await invoke<InitStatus>("get_init_status")
         if (res.status === 1) {
           setModelsReady(true)
@@ -174,7 +174,6 @@ export function TranscribePage() {
     // Trigger lazy loading of ASR models when the Transcribe page mounts
     const loadModels = async () => {
       try {
-        const { invoke } = await import("@tauri-apps/api/core")
         const res = await invoke<InitStatus>("ensure_asr_models")
         if (res.status === 1) {
           setModelsReady(true)
@@ -202,7 +201,6 @@ export function TranscribePage() {
       // Start 5-minute timer to release ASR models after leaving the page
       window.__velocitext_release_timer = setTimeout(async () => {
         try {
-          const { invoke } = await import("@tauri-apps/api/core")
           await invoke("release_asr_models")
           console.log("[ASR] models released after 5 min inactivity")
         } catch {
@@ -215,7 +213,6 @@ export function TranscribePage() {
   // ── File selection ──────────────────────────────────────────────────────
   const openFileDialog = async (multiple: boolean) => {
     try {
-      const { open } = await import("@tauri-apps/plugin-dialog")
       const selected = await open({
         multiple,
         filters: [
@@ -264,7 +261,6 @@ export function TranscribePage() {
     if (pollTimerRef.current) clearInterval(pollTimerRef.current)
 
     try {
-      const { invoke } = await import("@tauri-apps/api/core")
       await invoke("recognize_file", { path })
       // Start polling for results
       startProgressPolling()
@@ -277,7 +273,6 @@ export function TranscribePage() {
   const startProgressPolling = () => {
     pollTimerRef.current = setInterval(async () => {
       try {
-        const { invoke } = await import("@tauri-apps/api/core")
         const state = await invoke<ProcessingState>("get_recognition_progress")
 
         setProgress(state.percent)
@@ -325,7 +320,6 @@ export function TranscribePage() {
   }
 
   const handleCancel = async () => {
-    const { invoke } = await import("@tauri-apps/api/core")
     await invoke("cancel_recognition")
   }
 
@@ -411,9 +405,6 @@ export function TranscribePage() {
     const seg = segmentsRef.current[segIdx]
     if (!seg || !filePath) return
 
-    const { save } = await import("@tauri-apps/plugin-dialog")
-    const { invoke } = await import("@tauri-apps/api/core")
-
     const start = seg.start.toFixed(2).replace(".", "_")
     const end = seg.end.toFixed(2).replace(".", "_")
     const textPart = seg.text.replace(/[^\w\u4e00-\u9fff]/g, "_").slice(0, 30)
@@ -457,9 +448,6 @@ export function TranscribePage() {
   const handleExportSrt = async () => {
     if (!filePath) return
 
-    const { save } = await import("@tauri-apps/plugin-dialog")
-    const { invoke } = await import("@tauri-apps/api/core")
-
     const baseName = filePath.split(/[\\/]/).pop() || "transcript"
     const nameWithoutExt = baseName.replace(/\.[^.]+$/, "")
 
@@ -485,9 +473,6 @@ export function TranscribePage() {
   const handleExportTxt = async () => {
     if (!filePath) return
 
-    const { save } = await import("@tauri-apps/plugin-dialog")
-    const { invoke } = await import("@tauri-apps/api/core")
-
     const baseName = filePath.split(/[\\/]/).pop() || "transcript"
     const nameWithoutExt = baseName.replace(/\.[^.]+$/, "")
 
@@ -512,7 +497,6 @@ export function TranscribePage() {
   // ── VAD Settings ────────────────────────────────────────────────────────
   const loadVadSettings = async () => {
     try {
-      const { invoke } = await import("@tauri-apps/api/core")
       const s = await invoke<VadSettings>("get_vad_settings")
       setVadThreshold(String(s.threshold))
       setVadMinSilence(String(s.minSilenceDuration))
@@ -556,7 +540,6 @@ export function TranscribePage() {
     setShowSettings(false)
 
     try {
-      const { invoke } = await import("@tauri-apps/api/core")
       await invoke("apply_vad_settings", {
         newSettings: {
           threshold,

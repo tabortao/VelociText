@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -12,8 +12,12 @@ import {
   ScanTextIcon,
   AlertTriangleIcon,
   CameraIcon,
+  CheckCircleIcon,
+  XCircleIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
 } from "lucide-react"
-import { convertFileSrc } from "@tauri-apps/api/core"
+import { invoke, convertFileSrc } from "@tauri-apps/api/core"
 import { open } from "@tauri-apps/plugin-dialog"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
 import { useAppContext } from "@/lib/app-context"
@@ -28,21 +32,31 @@ const MODEL_DISPLAY: Record<string, string> = {
   "ppocr-v6": "PaddleOCR V6",
 }
 
+const IMAGE_EXTS = ["png", "jpg", "jpeg", "bmp", "webp", "tiff", "tif"]
+
+interface BatchOcrItem {
+  path: string
+  fileName: string
+  imageUrl: string
+  state: OCRState
+  result: OcrResult | null
+  error: string | null
+}
+
 interface OCRPageProps {
   onScreenshotTrigger?: () => void
 }
 
 export function OCRPage({ onScreenshotTrigger }: OCRPageProps) {
   const { t } = useAppContext()
-  const [ocrState, setOCRState] = useState<OCRState>("idle")
-  const [imagePath, setImagePath] = useState<string | null>(null)
-  const [imageUrl, setImageUrl] = useState<string>("")
-  const [result, setResult] = useState<OcrResult | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [items, setItems] = useState<BatchOcrItem[]>([])
   const [isDragOver, setIsDragOver] = useState(false)
   const [activeModel, setActiveModel] = useState("ppocr-v5")
   const [installedModels, setInstalledModels] = useState<Set<string>>(new Set())
   const [flashMessage, setFlashMessage] = useState("")
+  const [expandedIdx, setExpandedIdx] = useState<number>(-1)
+  const [batchProcessing, setBatchProcessing] = useState(false)
+  const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 })
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const modelInstalled = installedModels.has(activeModel)
@@ -63,11 +77,9 @@ export function OCRPage({ onScreenshotTrigger }: OCRPageProps) {
   useEffect(() => {
     const load = async () => {
       try {
-        const { invoke } = await import("@tauri-apps/api/core")
         const active = await invoke<string>("ocr_get_active_model")
         setActiveModel(active)
 
-        // Check which models are installed
         const models = await invoke<ModelInfo[]>("list_models")
         const installed = new Set<string>()
         for (const m of models) {
@@ -83,18 +95,24 @@ export function OCRPage({ onScreenshotTrigger }: OCRPageProps) {
     load()
   }, [])
 
-  // Listen for screenshot OCR results (dispatched from App.tsx via custom DOM event)
+  // Listen for screenshot OCR results
   useEffect(() => {
     const handler = (e: Event) => {
       const { text, timeMs } = (e as CustomEvent).detail
       if (text) {
-        setResult({
-          textBlocks: [{ text, confidence: 1.0, boxPoints: [] }],
-          totalTimeMs: timeMs,
-        })
-        setImagePath(null)
-        setImageUrl("")
-        setOCRState("completed")
+        const screenshotItem: BatchOcrItem = {
+          path: "",
+          fileName: t("ocr.screenshotBtn"),
+          imageUrl: "",
+          state: "completed",
+          result: {
+            textBlocks: [{ text, confidence: 1.0, boxPoints: [] }],
+            totalTimeMs: timeMs,
+          },
+          error: null,
+        }
+        setItems([screenshotItem])
+        setExpandedIdx(0)
         showFlash(
           t("ocr.completedToast", {
             blocks: 1,
@@ -118,8 +136,12 @@ export function OCRPage({ onScreenshotTrigger }: OCRPageProps) {
         unlistenDrop = await listen<string>("tauri://file-drop", (event) => {
           try {
             const paths: string[] = JSON.parse(event.payload)
-            if (paths.length > 0) {
-              handleFile(paths[0])
+            const imagePaths = paths.filter((p) => {
+              const ext = p.split(".").pop()?.toLowerCase() ?? ""
+              return IMAGE_EXTS.includes(ext)
+            })
+            if (imagePaths.length > 0) {
+              addFiles(imagePaths)
             }
           } catch {
             // ignore
@@ -144,81 +166,108 @@ export function OCRPage({ onScreenshotTrigger }: OCRPageProps) {
     }
   }, [])
 
-  const handleFile = useCallback(async (path: string) => {
-    const ext = path.split(".").pop()?.toLowerCase() ?? ""
-    const imageExts = ["png", "jpg", "jpeg", "bmp", "webp", "tiff", "tif"]
-    if (!imageExts.includes(ext)) {
-      setError(t("ocr.desc"))
-      return
-    }
-
-    setImagePath(path)
-    setImageUrl(convertFileSrc(path))
-    setResult(null)
-    setError(null)
-    setOCRState("idle")
-
-    // Auto-start OCR only if model is installed
+  const addFiles = useCallback((paths: string[]) => {
+    const newItems: BatchOcrItem[] = paths.map((p) => ({
+      path: p,
+      fileName: p.split(/[/\\]/).pop() || p,
+      imageUrl: convertFileSrc(p),
+      state: "loading" as OCRState,
+      result: null,
+      error: null,
+    }))
+    setItems((prev) => [...prev, ...newItems])
+    setExpandedIdx(newItems.length === 1 ? 0 : -1)
+    // Auto-start OCR for new items
     if (modelInstalled) {
-      startOCR(path)
+      startBatchOCRForPaths(newItems.map((item) => item.path))
     }
-  }, [modelInstalled, t])
+  }, [modelInstalled])
 
   const handleOpenFile = async () => {
     try {
       const selected = await open({
-        multiple: false,
+        multiple: true,
         filters: [
           {
             name: "Images",
-            extensions: ["png", "jpg", "jpeg", "bmp", "webp", "tiff", "tif"],
+            extensions: IMAGE_EXTS,
           },
         ],
       })
       if (selected) {
-        handleFile(selected as string)
+        const paths = Array.isArray(selected) ? selected : [selected]
+        addFiles(paths)
       }
     } catch (err) {
       console.error("Failed to open file:", err)
     }
   }
 
-  const startOCR = async (path: string) => {
-    if (!modelInstalled) {
-      setError(t("ocr.modelNotInstalled", { model: MODEL_DISPLAY[activeModel] ?? activeModel }))
-      return
-    }
+  const startBatchOCRForPaths = useCallback(async (paths: string[]) => {
+    if (!modelInstalled || paths.length === 0) return
 
-    setOCRState("loading")
-    setError(null)
+    setBatchProcessing(true)
+    setBatchProgress({ current: 0, total: paths.length })
 
-    try {
-      const { invoke } = await import("@tauri-apps/api/core")
-      const res = await invoke<OcrResult>("ocr_recognize", {
-        imagePath: path,
-        modelVersion: activeModel,
-      })
-      setResult(res)
-      setOCRState("completed")
-      showFlash(
-        t("ocr.completedToast", {
-          blocks: res.textBlocks.length,
-          time: (res.totalTimeMs / 1000).toFixed(1),
-        })
+    let succeeded = 0
+    let failed = 0
+    let totalTimeMs = 0
+
+    for (let i = 0; i < paths.length; i++) {
+      const itemPath = paths[i]
+      setBatchProgress({ current: i + 1, total: paths.length })
+
+      // Mark item as loading
+      setItems((prev) =>
+        prev.map((it) =>
+          it.path === itemPath ? { ...it, state: "loading" as OCRState, error: null } : it
+        )
       )
-    } catch (err) {
-      setError(String(err))
-      setOCRState("error")
+
+      try {
+        const res = await invoke<OcrResult>("ocr_recognize", {
+          imagePath: itemPath,
+          modelVersion: activeModel,
+        })
+        setItems((prev) =>
+          prev.map((it) =>
+            it.path === itemPath ? { ...it, state: "completed" as OCRState, result: res } : it
+          )
+        )
+        succeeded++
+        totalTimeMs += res.totalTimeMs
+      } catch (err) {
+        setItems((prev) =>
+          prev.map((it) =>
+            it.path === itemPath
+              ? { ...it, state: "error" as OCRState, error: String(err) }
+              : it
+          )
+        )
+        failed++
+      }
     }
+
+    setBatchProcessing(false)
+    showFlash(
+      t("ocr.batchDone", {
+        count: succeeded,
+        time: (totalTimeMs / 1000).toFixed(1),
+      })
+    )
+  }, [modelInstalled, activeModel, showFlash, t])
+
+  const startBatchOCR = async () => {
+    const pendingItems = items.filter((item) => item.state === "idle" || item.state === "error")
+    if (pendingItems.length === 0) return
+    await startBatchOCRForPaths(pendingItems.map((item) => item.path))
   }
 
   const handleModelChange = async (model: string) => {
     setActiveModel(model)
     try {
-      const { invoke } = await import("@tauri-apps/api/core")
       await invoke("ocr_set_active_model", { modelName: model })
 
-      // Refresh installed status
       const models = await invoke<ModelInfo[]>("list_models")
       const installed = new Set<string>()
       for (const m of models) {
@@ -230,59 +279,89 @@ export function OCRPage({ onScreenshotTrigger }: OCRPageProps) {
     } catch {
       // ignore
     }
-
-    // Re-run OCR only if the new model is installed and image is loaded
-    if (imagePath && installedModels.has(model)) {
-      setTimeout(() => startOCR(imagePath), 100)
-    }
   }
 
   const handleClear = () => {
-    setImagePath(null)
-    setImageUrl("")
-    setResult(null)
-    setError(null)
-    setOCRState("idle")
+    setItems([])
+    setExpandedIdx(-1)
   }
 
-  const handleCopyText = async () => {
-    if (!result) return
-    const text = result.textBlocks.map((b) => b.text).join("\n")
+  const handleRemoveItem = (idx: number) => {
+    setItems((prev) => prev.filter((_, i) => i !== idx))
+    if (expandedIdx === idx) setExpandedIdx(-1)
+    else if (expandedIdx > idx) setExpandedIdx(expandedIdx - 1)
+  }
+
+  const handleCopyAllText = async () => {
+    const allText = items
+      .filter((item) => item.state === "completed" && item.result)
+      .map((item) => item.result!.textBlocks.map((b) => b.text).join("\n"))
+      .join("\n\n")
+    if (!allText) return
     try {
-      const { invoke } = await import("@tauri-apps/api/core")
+      await invoke("copy_text_to_clipboard", { text: allText })
+      showFlash(t("ocr.copyText"))
+    } catch {
+      await navigator.clipboard.writeText(allText)
+      showFlash(t("ocr.copyText"))
+    }
+  }
+
+  const handleCopyItemText = async (item: BatchOcrItem) => {
+    if (!item.result) return
+    const text = item.result.textBlocks.map((b) => b.text).join("\n")
+    try {
       await invoke("copy_text_to_clipboard", { text })
       showFlash(t("ocr.copyText"))
     } catch {
-      // Fallback to browser clipboard
       await navigator.clipboard.writeText(text)
       showFlash(t("ocr.copyText"))
     }
   }
 
-  // Trigger screenshot capture → open transparent fullscreen window
-  const handleScreenshotOCR = async () => {
-    if (!modelInstalled) {
-      setError(t("ocr.modelNotInstalled", { model: MODEL_DISPLAY[activeModel] ?? activeModel }))
+  const handleExportAllTxt = async () => {
+    const completedItems = items.filter((item) => item.state === "completed" && item.result)
+    if (completedItems.length === 0) return
+
+    if (completedItems.length === 1) {
+      const item = completedItems[0]
+      const text = item.result!.textBlocks.map((b) => b.text).join("\n")
+      const baseName = item.path.replace(/\.[^.]+$/, "")
+      const exportPath = `${baseName}_ocr.txt`
+      try {
+        await invoke("write_text_file", { path: exportPath, content: text })
+        await invoke("open_file_with_system", { path: exportPath })
+        showFlash(t("ocr.exportTxt"))
+      } catch (err) {
+        console.error("Export failed:", err)
+      }
       return
     }
 
+    // Batch export: one txt per image
+    for (const item of completedItems) {
+      const text = item.result!.textBlocks.map((b) => b.text).join("\n")
+      const baseName = item.path.replace(/\.[^.]+$/, "")
+      const exportPath = `${baseName}_ocr.txt`
+      try {
+        await invoke("write_text_file", { path: exportPath, content: text })
+      } catch (err) {
+        console.error("Export failed for:", item.fileName, err)
+      }
+    }
+    showFlash(t("ocr.batchExportDone", { count: completedItems.length }))
+  }
+
+  const handleScreenshotOCR = async () => {
+    if (!modelInstalled) {
+      return
+    }
     onScreenshotTrigger?.()
   }
 
-  const handleExportTxt = async () => {
-    if (!result || !imagePath) return
-    try {
-      const { invoke } = await import("@tauri-apps/api/core")
-      const text = result.textBlocks.map((b) => b.text).join("\n")
-      const baseName = imagePath.replace(/\.[^.]+$/, "")
-      const exportPath = `${baseName}_ocr.txt`
-      await invoke("write_text_file", { path: exportPath, content: text })
-      await invoke("open_file_with_system", { path: exportPath })
-      showFlash(t("ocr.exportTxt"))
-    } catch (err) {
-      setError(String(err))
-    }
-  }
+  const hasItems = items.length > 0
+  const hasCompleted = items.some((item) => item.state === "completed")
+  const hasPending = items.some((item) => item.state === "idle" || item.state === "error")
 
   return (
     <div className="px-4 lg:px-6 space-y-4">
@@ -313,7 +392,30 @@ export function OCRPage({ onScreenshotTrigger }: OCRPageProps) {
           <UploadIcon className="size-4 mr-1" />
           {t("ocr.selectImage")}
         </Button>
-        <Button onClick={handleClear} variant="ghost" size="sm" disabled={!imagePath}>
+        {hasPending && !batchProcessing && (
+          <Button onClick={startBatchOCR} variant="outline" size="sm" title={t("ocr.retryFailed")}>
+            <ScanTextIcon className="size-4 mr-1" />
+            {t("ocr.retryFailed")}
+          </Button>
+        )}
+        {batchProcessing && (
+          <Badge variant="secondary" className="h-9 px-3">
+            {t("ocr.batchProgress", { current: batchProgress.current, total: batchProgress.total })}
+          </Badge>
+        )}
+        {hasCompleted && (
+          <Button onClick={handleCopyAllText} variant="outline" size="sm">
+            <CopyIcon className="size-4 mr-1" />
+            {t("ocr.copyAllText")}
+          </Button>
+        )}
+        {hasCompleted && (
+          <Button onClick={handleExportAllTxt} variant="outline" size="sm">
+            <FileTextIcon className="size-4 mr-1" />
+            {t("ocr.exportTxt")}
+          </Button>
+        )}
+        <Button onClick={handleClear} variant="ghost" size="sm" disabled={!hasItems}>
           <Trash2Icon className="size-4 mr-1" />
           {t("ocr.clear")}
         </Button>
@@ -334,13 +436,7 @@ export function OCRPage({ onScreenshotTrigger }: OCRPageProps) {
         </div>
       )}
 
-      {error && (
-        <div className="p-3 border border-red-200 rounded-lg bg-red-50 dark:bg-red-950 dark:border-red-800">
-          <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
-        </div>
-      )}
-
-      {!imagePath ? (
+      {!hasItems ? (
         /* Idle state: drag-and-drop zone */
         <Card
           className={`border-2 border-dashed transition-colors ${
@@ -361,124 +457,163 @@ export function OCRPage({ onScreenshotTrigger }: OCRPageProps) {
           </CardContent>
         </Card>
       ) : (
-        /* Image loaded: show preview + results */
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Image preview */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <ImageIcon className="size-4" />
-                {imagePath.split(/[/\\]/).pop()}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="relative rounded-lg overflow-hidden bg-muted">
-                <img
-                  src={imageUrl}
-                  alt="Preview"
-                  className="max-w-full max-h-[500px] object-contain mx-auto"
-                />
-              </div>
-            </CardContent>
-          </Card>
+        /* Batch items list */
+        <div className="space-y-2">
+          {items.map((item, idx) => (
+            <Card key={idx} className={expandedIdx === idx ? "ring-1 ring-primary/30" : ""}>
+              {/* Item header - always visible */}
+              <div
+                className="flex items-center gap-3 p-3 cursor-pointer hover:bg-accent/30 transition-colors"
+                onClick={() => setExpandedIdx(expandedIdx === idx ? -1 : idx)}
+              >
+                {expandedIdx === idx ? (
+                  <ChevronDownIcon className="size-4 text-muted-foreground shrink-0" />
+                ) : (
+                  <ChevronRightIcon className="size-4 text-muted-foreground shrink-0" />
+                )}
 
-          {/* Results panel */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <ScanTextIcon className="size-4" />
-                {ocrState === "loading"
-                  ? t("ocr.processing")
-                  : ocrState === "completed"
-                    ? t("ocr.completed")
-                    : t("ocr.title")}
-              </CardTitle>
-              {result && (
-                <CardDescription>
-                  {t("ocr.textBlocks", { count: result.textBlocks.length })}
-                </CardDescription>
-              )}
-            </CardHeader>
-            <CardContent>
-              {ocrState === "loading" && (
-                <div className="flex items-center justify-center py-12">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
-                </div>
-              )}
+                {/* Thumbnail */}
+                {item.imageUrl && (
+                  <div className="size-10 rounded border bg-muted overflow-hidden shrink-0">
+                    <img
+                      src={item.imageUrl}
+                      alt=""
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                )}
 
-              {ocrState === "completed" && result && (
-                <div className="space-y-3">
-                  {result.textBlocks.length === 0 ? (
-                    <p className="text-sm text-muted-foreground text-center py-8">
-                      {t("ocr.noTextFound")}
-                    </p>
-                  ) : (
-                    <div className="space-y-2 max-h-[450px] overflow-y-auto">
-                      {result.textBlocks.map((block, idx) => (
-                        <div
-                          key={idx}
-                          className="p-3 rounded-lg border bg-muted/30 hover:bg-muted/50 transition-colors"
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <p className="text-sm font-medium leading-relaxed break-all">
-                              {block.text}
-                            </p>
-                            <Badge variant="secondary" className="shrink-0 text-xs">
-                              {(block.confidence * 100).toFixed(1)}%
-                            </Badge>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  <Separator />
-
-                  <div className="flex gap-2">
-                    <Button
-                      onClick={handleCopyText}
-                      variant="outline"
-                      size="sm"
-                      disabled={result.textBlocks.length === 0}
-                    >
-                      <CopyIcon className="size-4 mr-1" />
-                      {t("ocr.copyText")}
-                    </Button>
-                    <Button
-                      onClick={handleExportTxt}
-                      variant="outline"
-                      size="sm"
-                      disabled={result.textBlocks.length === 0}
-                    >
-                      <FileTextIcon className="size-4 mr-1" />
-                      {t("ocr.exportTxt")}
-                    </Button>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{item.fileName}</p>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    {item.state === "loading" && (
+                      <div className="flex items-center gap-1.5">
+                        <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary" />
+                        <span className="text-xs text-muted-foreground">{t("ocr.processing")}</span>
+                      </div>
+                    )}
+                    {item.state === "completed" && item.result && (
+                      <div className="flex items-center gap-1.5">
+                        <CheckCircleIcon className="size-3 text-green-600 dark:text-green-400" />
+                        <span className="text-xs text-muted-foreground">
+                          {t("ocr.textBlocks", { count: item.result.textBlocks.length })}
+                          {" · "}
+                          {(item.result.totalTimeMs / 1000).toFixed(1)}s
+                        </span>
+                      </div>
+                    )}
+                    {item.state === "error" && (
+                      <div className="flex items-center gap-1.5">
+                        <XCircleIcon className="size-3 text-red-500" />
+                        <span className="text-xs text-red-500 truncate">{item.error}</span>
+                      </div>
+                    )}
+                    {item.state === "idle" && (
+                      <span className="text-xs text-muted-foreground">{t("ocr.pending")}</span>
+                    )}
                   </div>
                 </div>
-              )}
 
-              {ocrState === "idle" && !modelInstalled && (
-                <div className="text-center py-8">
-                  <p className="text-sm text-muted-foreground">{t("ocr.noModel")}</p>
+                {/* Actions */}
+                <div className="flex items-center gap-1 shrink-0">
+                  {item.state === "completed" && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-7"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleCopyItemText(item)
+                      }}
+                      title={t("ocr.copyText")}
+                    >
+                      <CopyIcon className="size-3.5" />
+                    </Button>
+                  )}
+                  {!batchProcessing && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-7"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleRemoveItem(idx)
+                      }}
+                      title={t("ocr.clear")}
+                    >
+                      <XCircleIcon className="size-3.5" />
+                    </Button>
+                  )}
                 </div>
-              )}
+              </div>
 
-              {ocrState === "idle" && modelInstalled && (
-                <div className="text-center py-8">
-                  <p className="text-sm text-muted-foreground">{t("ocr.clickOrDrag")}</p>
-                  <Button
-                    onClick={() => imagePath && startOCR(imagePath)}
-                    variant="default"
-                    size="sm"
-                    className="mt-3"
-                  >
-                    <ScanTextIcon className="size-4 mr-1" />
-                    {t("ocr.title")}
-                  </Button>
-                </div>
+              {/* Expanded detail */}
+              {expandedIdx === idx && (
+                <CardContent className="pt-0 pb-3">
+                  <Separator className="mb-3" />
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                    {/* Image preview */}
+                    {item.imageUrl && (
+                      <div className="relative rounded-lg overflow-hidden bg-muted">
+                        <img
+                          src={item.imageUrl}
+                          alt="Preview"
+                          className="max-w-full max-h-[300px] object-contain mx-auto"
+                        />
+                      </div>
+                    )}
+
+                    {/* OCR result */}
+                    <div>
+                      {item.state === "loading" && (
+                        <div className="flex items-center justify-center py-8">
+                          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary" />
+                        </div>
+                      )}
+
+                      {item.state === "completed" && item.result && (
+                        <div className="space-y-2">
+                          {item.result.textBlocks.length === 0 ? (
+                            <p className="text-sm text-muted-foreground text-center py-4">
+                              {t("ocr.noTextFound")}
+                            </p>
+                          ) : (
+                            <div className="space-y-1.5 max-h-[250px] overflow-y-auto">
+                              {item.result.textBlocks.map((block, bIdx) => (
+                                <div
+                                  key={bIdx}
+                                  className="p-2 rounded-lg border bg-muted/30 hover:bg-muted/50 transition-colors"
+                                >
+                                  <div className="flex items-start justify-between gap-2">
+                                    <p className="text-sm leading-relaxed break-all">
+                                      {block.text}
+                                    </p>
+                                    <Badge variant="secondary" className="shrink-0 text-xs">
+                                      {(block.confidence * 100).toFixed(1)}%
+                                    </Badge>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {item.state === "error" && (
+                        <p className="text-sm text-red-600 dark:text-red-400 py-4">{item.error}</p>
+                      )}
+
+                      {item.state === "idle" && (
+                        <p className="text-sm text-muted-foreground text-center py-4">
+                          {t("ocr.pending")}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
               )}
-            </CardContent>
-          </Card>
+            </Card>
+          ))}
         </div>
       )}
     </div>

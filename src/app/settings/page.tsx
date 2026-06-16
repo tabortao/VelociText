@@ -8,6 +8,8 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Settings2Icon, SaveIcon, CheckCircleIcon, XCircleIcon, DownloadIcon, AlertTriangleIcon } from "lucide-react"
+import { invoke } from "@tauri-apps/api/core"
+import { listen } from "@tauri-apps/api/event"
 import { useAppContext } from "@/lib/app-context"
 import type { AppConfig, Language } from "@/types"
 
@@ -107,7 +109,6 @@ export function SettingsPage() {
 
   const loadConfig = async () => {
     try {
-      const { invoke } = await import("@tauri-apps/api/core")
       const cfg = await invoke<AppConfig>("get_app_config")
       setConfig(cfg)
     } catch (err) {
@@ -117,7 +118,6 @@ export function SettingsPage() {
 
   const loadLanguages = async () => {
     try {
-      const { invoke } = await import("@tauri-apps/api/core")
       const langs = await invoke<Language[]>("get_languages")
       setLanguages(langs)
     } catch (err) {
@@ -127,7 +127,6 @@ export function SettingsPage() {
 
   const checkFfmpeg = async () => {
     try {
-      const { invoke } = await import("@tauri-apps/api/core")
       const version = await invoke<string>("check_ffmpeg")
       setFfmpegStatus({ found: true, version })
     } catch (err) {
@@ -143,7 +142,6 @@ export function SettingsPage() {
     let unlisten: (() => void) | undefined
     const setupListener = async () => {
       try {
-        const { listen } = await import("@tauri-apps/api/event")
         unlisten = await listen<FfmpegProgress>("ffmpeg-download-progress", (event) => {
           setFfmpegProgress(event.payload)
           if (event.payload.stage === "completed") {
@@ -170,7 +168,6 @@ export function SettingsPage() {
   const handleSave = async () => {
     if (!config) return
     try {
-      const { invoke } = await import("@tauri-apps/api/core")
       await invoke("set_app_config", { newConfig: config })
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
@@ -183,7 +180,6 @@ export function SettingsPage() {
     setFfmpegDownloading(true)
     setFfmpegProgress(null)
     try {
-      const { invoke } = await import("@tauri-apps/api/core")
       await invoke<string>("download_ffmpeg")
     } catch (err) {
       console.error("FFmpeg download failed:", err)

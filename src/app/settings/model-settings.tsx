@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Badge } from "@/components/ui/badge"
 import { CpuIcon, DownloadIcon, CheckCircleIcon, FolderOpenIcon, ZapIcon } from "lucide-react"
+import { invoke } from "@tauri-apps/api/core"
+import { listen } from "@tauri-apps/api/event"
 import { useAppContext } from "@/lib/app-context"
 import type { AppConfig, ModelInfo, DownloadProgress } from "@/types"
 
@@ -28,7 +30,6 @@ export function ModelSettingsPage() {
 
   const loadConfig = async () => {
     try {
-      const { invoke } = await import("@tauri-apps/api/core")
       const cfg = await invoke<AppConfig>("get_app_config")
       setConfig(cfg)
     } catch (err) {
@@ -38,7 +39,6 @@ export function ModelSettingsPage() {
 
   const loadModels = async () => {
     try {
-      const { invoke } = await import("@tauri-apps/api/core")
       const mods = await invoke<ModelInfo[]>("list_models")
       setModels(mods)
     } catch (err) {
@@ -48,7 +48,6 @@ export function ModelSettingsPage() {
 
   const loadActiveModel = async () => {
     try {
-      const { invoke } = await import("@tauri-apps/api/core")
       const active = await invoke<string>("get_active_model")
       setActiveModel(active)
       setSelectedAsr(active)
@@ -65,7 +64,6 @@ export function ModelSettingsPage() {
     let unlisten: (() => void) | undefined
     const setupListener = async () => {
       try {
-        const { listen } = await import("@tauri-apps/api/event")
         unlisten = await listen<DownloadProgress>("model-download-progress", (event) => {
           setDownloadProgress(event.payload)
           if (event.payload.stage === "completed") {
@@ -88,7 +86,6 @@ export function ModelSettingsPage() {
   const saveModelPath = async () => {
     if (!config) return
     try {
-      const { invoke } = await import("@tauri-apps/api/core")
       await invoke("set_app_config", { newConfig: config })
       loadModels()
     } catch (err) {
@@ -101,7 +98,6 @@ export function ModelSettingsPage() {
     setDownloadError(null)
     setDownloadProgress(null)
     try {
-      const { invoke } = await import("@tauri-apps/api/core")
       await invoke<string>("download_specific_model", { modelName })
     } catch (err) {
       setDownloadError(String(err))
@@ -112,7 +108,6 @@ export function ModelSettingsPage() {
   const handleSwitchModel = async (modelName: string) => {
     setSwitching(true)
     try {
-      const { invoke } = await import("@tauri-apps/api/core")
       await invoke<string>("set_active_model", { modelName })
     } catch (err) {
       console.error("Failed to switch model:", err)

@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { ClockIcon, Trash2Icon, FileTextIcon, ChevronDownIcon, ChevronRightIcon } from "lucide-react"
+import { invoke } from "@tauri-apps/api/core"
 import { useAppContext } from "@/lib/app-context"
 import type { HistoryEntry } from "@/types"
 
@@ -13,7 +14,6 @@ export function HistoryPage() {
 
   const loadHistory = async () => {
     try {
-      const { invoke } = await import("@tauri-apps/api/core")
       const data = await invoke<HistoryEntry[]>("get_history")
       setEntries(data)
     } catch (err) {
@@ -27,7 +27,6 @@ export function HistoryPage() {
 
   const handleDelete = async (id: string) => {
     try {
-      const { invoke } = await import("@tauri-apps/api/core")
       await invoke("delete_history", { id })
       setEntries((prev) => prev.filter((e) => e.id !== id))
       if (expandedId === id) setExpandedId(null)
@@ -38,7 +37,6 @@ export function HistoryPage() {
 
   const handleClearAll = async () => {
     try {
-      const { invoke } = await import("@tauri-apps/api/core")
       await invoke("clear_history")
       setEntries([])
       setExpandedId(null)

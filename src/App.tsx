@@ -123,12 +123,15 @@ export default function App() {
           timeMs: number
         }>("screenshot-ocr-result", (event) => {
           const { text, timeMs } = event.payload
-          setCurrentPage("ocr")
-          window.dispatchEvent(
-            new CustomEvent("velocitext:screenshot-ocr-result", {
-              detail: { text, timeMs },
-            })
-          )
+          // Only navigate to OCR page and show result if window is visible
+          if (document.visibilityState === "visible") {
+            setCurrentPage("ocr")
+            window.dispatchEvent(
+              new CustomEvent("velocitext:screenshot-ocr-result", {
+                detail: { text, timeMs },
+              })
+            )
+          }
           if (text) {
             showGreenToast("文本复制成功")
           }
