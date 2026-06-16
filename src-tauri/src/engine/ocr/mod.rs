@@ -303,8 +303,11 @@ impl OcrEngine {
 
     /// Run OCR on an in-memory image (DynamicImage) with optional scale factor.
     ///
-    /// When `scale_factor` is below 1.5, the image is resized up to ensure
-    /// sufficient resolution for OCR (using Lanczos3 filtering).
+    /// Preprocessing strategy:
+    /// - Small images (long side < 960px): resize up to 1.5x for better OCR accuracy
+    /// - Large images (long side >= 960px): resize down to max 1920px for faster processing
+    /// - PaddleOCR internally limits detection input to `max_side_len`, so pre-resizing
+    ///   avoids unnecessary computation on oversized images.
     /// References snow-shot's `ocr_detect_core` scale factor handling.
     pub fn recognize_from_image(
         &mut self,
@@ -314,18 +317,35 @@ impl OcrEngine {
         let start = std::time::Instant::now();
 
         let mut image = img.clone();
-        let effective_scale = scale_factor;
+        let long_side = image.width().max(image.height());
 
-        // If the image is too small, resize it to reach effective scale of 1.5
-        let target_scale_factor = 1.5;
-        if effective_scale < target_scale_factor && effective_scale > 0.0 {
-            let resize_factor = target_scale_factor / effective_scale;
+        // PaddleOCR optimal detection size is around 960px.
+        // For small images, scale up for better accuracy.
+        // For large images, scale down to avoid excessive computation.
+        const OCR_TARGET_SIZE: u32 = 960;
+        const OCR_MAX_SIZE: u32 = 1920;
+
+        if long_side < OCR_TARGET_SIZE {
+            // Small image: scale up to 1.5x for better OCR accuracy
+            let target_scale_factor = 1.5;
+            if scale_factor < target_scale_factor && scale_factor > 0.0 {
+                let resize_factor = target_scale_factor / scale_factor;
+                image = image.resize(
+                    (image.width() as f32 * resize_factor) as u32,
+                    (image.height() as f32 * resize_factor) as u32,
+                    image::imageops::FilterType::Lanczos3,
+                );
+            }
+        } else if long_side > OCR_MAX_SIZE {
+            // Large image: scale down to OCR_MAX_SIZE for faster processing
+            let scale = OCR_MAX_SIZE as f32 / long_side as f32;
             image = image.resize(
-                (image.width() as f32 * resize_factor) as u32,
-                (image.height() as f32 * resize_factor) as u32,
+                (image.width() as f32 * scale) as u32,
+                (image.height() as f32 * scale) as u32,
                 image::imageops::FilterType::Lanczos3,
             );
         }
+        // Images between 960-1920px: use as-is (already in a good range)
 
         let max_size = image.height().max(image.width());
 

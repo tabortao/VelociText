@@ -91,6 +91,10 @@ tauri-plugin-global-shortcut = "2"
 # 单实例 (prevent multiple instances, activate existing window)
 tauri-plugin-single-instance = "2"
 
+# PDF 渲染 (将 PDF 页面渲染为图片后进行 OCR)
+# 使用 Google Chromium 的 PDFium 引擎，需要 pdfium.dll
+pdfium-render = "0.8"
+
 
 [profile.dev]
 incremental = true # Compile your binary in smaller steps.

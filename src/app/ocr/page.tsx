@@ -33,6 +33,8 @@ const MODEL_DISPLAY: Record<string, string> = {
 }
 
 const IMAGE_EXTS = ["png", "jpg", "jpeg", "bmp", "webp", "tiff", "tif"]
+const PDF_EXTS = ["pdf"]
+const ALL_OCR_EXTS = [...IMAGE_EXTS, ...PDF_EXTS]
 
 interface BatchOcrItem {
   path: string
@@ -58,8 +60,15 @@ export function OCRPage({ onScreenshotTrigger }: OCRPageProps) {
   const [batchProcessing, setBatchProcessing] = useState(false)
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 })
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const modelInstalledRef = useRef(false)
+  const startBatchOCRForPathsRef = useRef<(paths: string[]) => Promise<void>>(undefined as unknown as (paths: string[]) => Promise<void>)
 
   const modelInstalled = installedModels.has(activeModel)
+
+  // Keep ref in sync
+  useEffect(() => {
+    modelInstalledRef.current = modelInstalled
+  }, [modelInstalled])
 
   const showFlash = useCallback((msg: string) => {
     setFlashMessage(msg)
@@ -145,8 +154,15 @@ export function OCRPage({ onScreenshotTrigger }: OCRPageProps) {
               const ext = p.split(".").pop()?.toLowerCase() ?? ""
               return IMAGE_EXTS.includes(ext)
             })
+            const pdfPaths = paths.filter((p) => {
+              const ext = p.split(".").pop()?.toLowerCase() ?? ""
+              return PDF_EXTS.includes(ext)
+            })
             if (imagePaths.length > 0) {
               addFiles(imagePaths)
+            }
+            if (pdfPaths.length > 0) {
+              addPdfFiles(pdfPaths)
             }
           } catch {
             // ignore
@@ -182,11 +198,11 @@ export function OCRPage({ onScreenshotTrigger }: OCRPageProps) {
     }))
     setItems((prev) => [...prev, ...newItems])
     setExpandedIdx(newItems.length === 1 ? 0 : -1)
-    // Auto-start OCR for new items
-    if (modelInstalled) {
-      startBatchOCRForPaths(newItems.map((item) => item.path))
+    // Auto-start OCR for new items using ref to avoid stale closure
+    if (modelInstalledRef.current && startBatchOCRForPathsRef.current) {
+      startBatchOCRForPathsRef.current(newItems.map((item) => item.path))
     }
-  }, [modelInstalled])
+  }, [])
 
   const handleOpenFile = async () => {
     try {
@@ -194,19 +210,100 @@ export function OCRPage({ onScreenshotTrigger }: OCRPageProps) {
         multiple: true,
         filters: [
           {
-            name: "Images",
-            extensions: IMAGE_EXTS,
+            name: "Images & PDF",
+            extensions: ALL_OCR_EXTS,
           },
         ],
       })
       if (selected) {
         const paths = Array.isArray(selected) ? selected : [selected]
-        addFiles(paths)
+        const imagePaths = paths.filter((p) => {
+          const ext = p.split(".").pop()?.toLowerCase() ?? ""
+          return IMAGE_EXTS.includes(ext)
+        })
+        const pdfPaths = paths.filter((p) => {
+          const ext = p.split(".").pop()?.toLowerCase() ?? ""
+          return PDF_EXTS.includes(ext)
+        })
+        if (imagePaths.length > 0) addFiles(imagePaths)
+        if (pdfPaths.length > 0) addPdfFiles(pdfPaths)
       }
     } catch (err) {
       console.error("Failed to open file:", err)
     }
   }
+
+  const addPdfFiles = useCallback(
+    (paths: string[]) => {
+      if (!modelInstalledRef.current || !startBatchOCRForPathsRef.current) return
+
+      for (const pdfPath of paths) {
+        const fileName = pdfPath.split(/[/\\]/).pop() || pdfPath
+        // Create a placeholder item for the PDF
+        const pdfItem: BatchOcrItem = {
+          path: pdfPath,
+          fileName: `${fileName} (PDF)`,
+          imageUrl: "",
+          state: "loading" as OCRState,
+          result: null,
+          error: null,
+        }
+        setItems((prev) => [...prev, pdfItem])
+
+        // Process PDF asynchronously
+        const processPdf = async () => {
+          try {
+            const results = await invoke<
+              Array<{
+                pageIndex: number
+                imagePath: string
+                ocrResult: OcrResult
+              }>
+            >("ocr_recognize_pdf", {
+              pdfPath,
+              modelVersion: activeModel,
+              dpi: 200,
+            })
+
+            if (results.length === 0) {
+              setItems((prev) =>
+                prev.map((it) =>
+                  it.path === pdfPath
+                    ? { ...it, state: "completed" as OCRState, result: { textBlocks: [], totalTimeMs: 0 } }
+                    : it
+                )
+              )
+              return
+            }
+
+            // Remove the placeholder and add individual page items
+            setItems((prev) => {
+              const withoutPlaceholder = prev.filter((it) => it.path !== pdfPath)
+              const pageItems: BatchOcrItem[] = results.map((r) => ({
+                path: `${pdfPath}#page=${r.pageIndex}`,
+                fileName: `${fileName} - ${t("ocr.pdfPage", { page: r.pageIndex + 1 })}`,
+                imageUrl: convertFileSrc(r.imagePath),
+                state: "completed" as OCRState,
+                result: r.ocrResult,
+                error: null,
+              }))
+              return [...withoutPlaceholder, ...pageItems]
+            })
+          } catch (err) {
+            setItems((prev) =>
+              prev.map((it) =>
+                it.path === pdfPath
+                  ? { ...it, state: "error" as OCRState, error: String(err) }
+                  : it
+              )
+            )
+          }
+        }
+        processPdf()
+      }
+    },
+    [activeModel, t]
+  )
 
   const startBatchOCRForPaths = useCallback(async (paths: string[]) => {
     if (!modelInstalled || paths.length === 0) return
@@ -261,6 +358,11 @@ export function OCRPage({ onScreenshotTrigger }: OCRPageProps) {
       })
     )
   }, [modelInstalled, activeModel, showFlash, t])
+
+  // Keep ref in sync so addFiles can call it without stale closure
+  useEffect(() => {
+    startBatchOCRForPathsRef.current = startBatchOCRForPaths
+  }, [startBatchOCRForPaths])
 
   const startBatchOCR = async () => {
     const pendingItems = items.filter((item) => item.state === "idle" || item.state === "error")

@@ -9,8 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Batch OCR recognition**: the OCR page now supports selecting or dragging multiple images for batch recognition. Images are automatically processed upon selection — no manual "Start OCR" click needed. Each image shows its own status (processing, completed, error) with expandable detail view. Batch export writes one `_ocr.txt` file per image. "Copy All" copies all recognized text to clipboard. The file dialog now allows multiple selection (`multiple: true`). A "Retry Failed" button is available for re-processing failed items.
+- **PDF OCR support**: the OCR page now supports selecting or dragging PDF files. Each PDF page is rendered to an image (at 200 DPI) using `fop-pdf-renderer` (pure Rust, no external DLL dependency), then OCR is performed on each page independently. Results are displayed as separate items per page with the rendered page as preview. Added `pdf_get_page_count`, `pdf_render_page`, and `ocr_recognize_pdf` Tauri commands.
+
+### Fixed
+- **Drag-and-drop OCR not working**: the `addFiles` callback captured a stale `modelInstalled` value (always `false` on first render) in the drag-drop event listener closure. Fixed by using `useRef` to track `modelInstalled` and `startBatchOCRForPaths`, ensuring the callback always uses the latest values.
 
 ### Changed
+- **Large image OCR speed optimization**: images with a long side exceeding 1920px are now automatically downscaled to 1920px before OCR processing. Previously, all images were upscaled to 1.5x regardless of size, causing unnecessary computation on large images. Small images (< 960px) still get the 1.5x upscale for better accuracy. Images between 960-1920px are used as-is.
 - **Screenshot OCR result display**: when the app window is visible, screenshot OCR results now appear in the OCR page's batch list with the same expandable detail view as image-based OCR, including the cropped screenshot preview and individual text blocks with confidence scores.
 - **Desktop toast notification for screenshot OCR**: when the app is minimized to the system tray, pressing the screenshot OCR shortcut shows a desktop-level toast notification ("文本复制成功") at 18% screen height with light green background and dark green text. The toast auto-closes after 2.3 seconds. The main window stays hidden.
 - **Silent screenshot OCR when minimized**: when the app is minimized to the system tray, pressing the screenshot OCR shortcut no longer shows the main window. The screenshot is taken silently, OCR is performed, and the result is copied to the clipboard.

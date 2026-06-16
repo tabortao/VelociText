@@ -635,6 +635,9 @@ pub fn run() {
             commands::ocr::ocr_get_active_model,
             commands::ocr::ocr_set_active_model,
             commands::ocr::ocr_release,
+            commands::ocr::pdf_get_page_count,
+            commands::ocr::pdf_render_page,
+            commands::ocr::ocr_recognize_pdf,
         ])
         .setup(move |app| {
             // System tray — references snow-shot's tray implementation

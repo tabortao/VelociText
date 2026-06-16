@@ -180,10 +180,10 @@ const dict = {
 
     // OCR page
     "ocr.title": "OCR 文字识别",
-    "ocr.desc": "支持 PNG, JPG, JPEG, BMP, WEBP 等图片格式",
-    "ocr.dropImages": "拖入图片进行识别",
-    "ocr.clickOrDrag": "点击选择或拖拽图片到此处",
-    "ocr.selectImage": "选择图片",
+    "ocr.desc": "支持 PNG, JPG, JPEG, BMP, WEBP 等图片格式及 PDF 文档",
+    "ocr.dropImages": "拖入文件进行识别",
+    "ocr.clickOrDrag": "点击选择或拖拽文件（图片/PDF）到此处",
+    "ocr.selectImage": "选择文件",
     "ocr.processing": "识别中...",
     "ocr.completed": "识别完成",
     "ocr.noTextFound": "未检测到文字",
@@ -384,10 +384,10 @@ const dict = {
 
     // OCR page
     "ocr.title": "OCR Text Recognition",
-    "ocr.desc": "Supports PNG, JPG, JPEG, BMP, WEBP image formats",
-    "ocr.dropImages": "Drop images to recognize text",
-    "ocr.clickOrDrag": "Click to select or drag images here",
-    "ocr.selectImage": "Select Image",
+    "ocr.desc": "Supports PNG, JPG, JPEG, BMP, WEBP image formats and PDF documents",
+    "ocr.dropImages": "Drop files to recognize text",
+    "ocr.clickOrDrag": "Click to select or drag files (images/PDF) here",
+    "ocr.selectImage": "Select File",
     "ocr.processing": "Processing...",
     "ocr.completed": "Recognition complete",
     "ocr.noTextFound": "No text detected",
@@ -411,6 +411,7 @@ const dict = {
     "ocr.copyAllText": "Copy All",
     "ocr.batchExportDone": "Exported {count} files",
     "ocr.pending": "Pending",
+    "ocr.pdfPage": "Page {page}",
   },
 }
 

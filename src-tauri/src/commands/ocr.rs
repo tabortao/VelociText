@@ -4,6 +4,241 @@ use crate::AppState;
 use std::path::Path;
 use tauri::{Emitter, Manager};
 
+/// Create a Pdfium instance, looking for pdfium.dll in multiple locations.
+fn create_pdfium(app: &tauri::AppHandle) -> Result<pdfium_render::prelude::Pdfium, String> {
+    // Candidate paths to search for pdfium.dll
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+
+    // 1. Next to the executable
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(parent) = exe_path.parent() {
+            candidates.push(parent.join("pdfium.dll"));
+            candidates.push(parent.join("bin").join("pdfium.dll"));
+        }
+    }
+
+    // 2. Tauri resource directory
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        candidates.push(resource_dir.join("pdfium.dll"));
+        candidates.push(resource_dir.join("bin").join("pdfium.dll"));
+    }
+
+    // 3. Current working directory
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join("pdfium.dll"));
+    }
+
+    // Try each candidate
+    for dll_path in &candidates {
+        if dll_path.exists() {
+            log::info!("[PDF] Loading pdfium.dll from: {}", dll_path.display());
+            match pdfium_render::prelude::Pdfium::bind_to_library(dll_path) {
+                Ok(bindings) => return Ok(pdfium_render::prelude::Pdfium::new(bindings)),
+                Err(e) => {
+                    log::warn!("[PDF] Found pdfium.dll at {} but failed to bind: {e}", dll_path.display());
+                    continue;
+                }
+            }
+        }
+    }
+
+    // Fall back to system library
+    log::info!("[PDF] Falling back to system pdfium library");
+    let bindings = pdfium_render::prelude::Pdfium::bind_to_library(
+        pdfium_render::prelude::Pdfium::pdfium_platform_library_name(),
+    )
+    .map_err(|e| {
+        let searched = candidates
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(
+            "Failed to find pdfium.dll. Searched: [{}]. System error: {e}",
+            searched
+        )
+    })?;
+    Ok(pdfium_render::prelude::Pdfium::new(bindings))
+}
+
+/// Render a PDF page to a PNG image using pdfium-render.
+/// Returns the path to the rendered PNG file.
+fn render_pdf_page_to_image(
+    pdfium: &pdfium_render::prelude::Pdfium,
+    pdf_path: &str,
+    page_index: u16,
+    dpi: f32,
+) -> Result<String, String> {
+    let document = pdfium
+        .load_pdf_from_file(pdf_path, None)
+        .map_err(|e| format!("Failed to open PDF: {e}"))?;
+
+    let pages = document.pages();
+    if page_index as usize >= pages.len() as usize {
+        return Err(format!(
+            "Page index {} out of range (total: {})",
+            page_index,
+            pages.len()
+        ));
+    }
+
+    let page = pages
+        .get(page_index)
+        .map_err(|e| format!("Failed to get page: {e}"))?;
+
+    // Render at specified DPI (default 72 DPI = 1x scale)
+    let scale = dpi / 72.0;
+    let target_width = (page.width().value as f32 * scale) as i32;
+    let target_height = (page.height().value as f32 * scale) as i32;
+
+    let config = pdfium_render::prelude::PdfRenderConfig::new()
+        .set_target_width(target_width)
+        .set_target_height(target_height);
+
+    let bitmap = page
+        .render_with_config(&config)
+        .map_err(|e| format!("Failed to render PDF page: {e}"))?;
+
+    // Save as PNG
+    let temp_dir = std::env::temp_dir();
+    let png_path = temp_dir.join(format!("velocitext_pdf_page_{}.png", page_index));
+    bitmap
+        .as_image()
+        .save(&png_path)
+        .map_err(|e| format!("Failed to save rendered page: {e}"))?;
+
+    Ok(png_path.to_string_lossy().to_string())
+}
+
+/// Get the number of pages in a PDF file.
+#[tauri::command]
+pub async fn pdf_get_page_count(
+    app: tauri::AppHandle,
+    pdf_path: String,
+) -> Result<u32, String> {
+    tokio::task::spawn_blocking(move || {
+        let pdfium = create_pdfium(&app)?;
+        let document = pdfium
+            .load_pdf_from_file(&pdf_path, None)
+            .map_err(|e| format!("Failed to open PDF: {e}"))?;
+        Ok(document.pages().len() as u32)
+    })
+    .await
+    .map_err(|e| format!("PDF task failed: {e}"))?
+}
+
+/// Render a specific page of a PDF to a PNG image.
+/// Returns the path to the rendered PNG file.
+#[tauri::command]
+pub async fn pdf_render_page(
+    app: tauri::AppHandle,
+    pdf_path: String,
+    page_index: u32,
+    dpi: Option<f32>,
+) -> Result<String, String> {
+    let dpi = dpi.unwrap_or(200.0);
+    let page_index = page_index as u16;
+
+    tokio::task::spawn_blocking(move || {
+        let pdfium = create_pdfium(&app)?;
+        render_pdf_page_to_image(&pdfium, &pdf_path, page_index, dpi)
+    })
+    .await
+    .map_err(|e| format!("PDF render task failed: {e}"))?
+}
+
+/// Run OCR on a PDF file by rendering each page and recognizing text.
+/// Returns a list of OcrResult, one per page.
+#[tauri::command]
+pub async fn ocr_recognize_pdf(
+    app: tauri::AppHandle,
+    pdf_path: String,
+    model_version: String,
+    dpi: Option<f32>,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let dpi = dpi.unwrap_or(200.0);
+    let model_path = {
+        let config = state.config.lock().map_err(|e| e.to_string())?;
+        config.model_path.clone()
+    };
+
+    let model_dir = Path::new(&model_path).join(&model_version);
+
+    if !is_ppocr_installed_at(&model_dir) {
+        return Err(format!(
+            "OCR model {} is not installed. Please download it from Model Settings.",
+            model_version
+        ));
+    }
+
+    let engine_arc = state.ocr_engine.clone();
+
+    tokio::task::spawn_blocking(move || {
+        let pdfium = create_pdfium(&app)?;
+
+        let document = pdfium
+            .load_pdf_from_file(&pdf_path, None)
+            .map_err(|e| format!("Failed to open PDF: {e}"))?;
+
+        let page_count = document.pages().len() as usize;
+        let mut results = Vec::with_capacity(page_count);
+
+        let mut guard = engine_arc.lock().map_err(|e| e.to_string())?;
+
+        for page_idx in 0..page_count {
+            // Render page to image
+            let page = document
+                .pages()
+                .get(page_idx as u16)
+                .map_err(|e| format!("Failed to get page {page_idx}: {e}"))?;
+
+            let scale = dpi / 72.0;
+            let target_width = (page.width().value as f32 * scale) as i32;
+            let target_height = (page.height().value as f32 * scale) as i32;
+
+            let config = pdfium_render::prelude::PdfRenderConfig::new()
+                .set_target_width(target_width)
+                .set_target_height(target_height);
+
+            let bitmap = page
+                .render_with_config(&config)
+                .map_err(|e| format!("Failed to render page {page_idx}: {e}"))?;
+
+            // Convert bitmap to DynamicImage
+            let img = bitmap.as_image();
+
+            // Run OCR on the rendered image
+            let ocr_result = if let Some(ref mut eng) = *guard {
+                eng.recognize_from_image(&img, 1.0)
+                    .map_err(|e| e.to_string())?
+            } else {
+                let mut eng =
+                    OcrEngine::new_with_memory(&model_dir, false).map_err(|e| e.to_string())?;
+                let result = eng.recognize_from_image(&img, 1.0).map_err(|e| e.to_string());
+                *guard = Some(eng);
+                result?
+            };
+
+            // Save rendered page as temp PNG for preview
+            let temp_dir = std::env::temp_dir();
+            let png_path = temp_dir.join(format!("velocitext_pdf_page_{page_idx}.png"));
+            let _ = img.save(&png_path);
+            let png_path_str = png_path.to_string_lossy().to_string();
+
+            results.push(serde_json::json!({
+                "pageIndex": page_idx,
+                "imagePath": png_path_str,
+                "ocrResult": ocr_result,
+            }));
+        }
+
+        Ok(results)
+    })
+    .await
+    .map_err(|e| format!("PDF OCR task failed: {e}"))?
+}
+
 /// Run OCR on an image file using the specified model version.
 ///
 /// Uses session reuse: the ONNX session is kept alive in AppState between calls
