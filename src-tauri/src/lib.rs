@@ -122,14 +122,22 @@ fn build_models(
                         "[build_models] Paraformer tokens.txt is in JSON format, converting..."
                     );
                     if let Ok(tokens) = serde_json::from_str::<Vec<String>>(&content) {
-                        let mut file = std::fs::File::create(&tokens_path).unwrap();
-                        for (i, token) in tokens.iter().enumerate() {
-                            let _ = writeln!(file, "{} {}", token, i);
+                        match std::fs::File::create(&tokens_path) {
+                            Ok(mut file) => {
+                                for (i, token) in tokens.iter().enumerate() {
+                                    let _ = writeln!(file, "{} {}", token, i);
+                                }
+                                log::info!(
+                                    "[build_models] tokens.txt converted with {} tokens",
+                                    tokens.len()
+                                );
+                            }
+                            Err(e) => {
+                                log::error!(
+                                    "[build_models] Failed to create tokens.txt: {e}"
+                                );
+                            }
                         }
-                        log::info!(
-                            "[build_models] tokens.txt converted with {} tokens",
-                            tokens.len()
-                        );
                     }
                 }
             }

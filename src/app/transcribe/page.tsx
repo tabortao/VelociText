@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -22,6 +22,7 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
 import { open, save } from "@tauri-apps/plugin-dialog"
 import { useAppContext } from "@/lib/app-context"
+import { WaveformPlayer, type WaveformPlayerHandle } from "@/components/waveform-player"
 import type { StreamingSegment, ProcessingState, InitStatus, VadSettings } from "@/types"
 
 type TranscribeState = "idle" | "loading" | "processing" | "completed" | "cancelled" | "error"
@@ -82,7 +83,8 @@ export function TranscribePage() {
   const [settingsApplying, setSettingsApplying] = useState(false)
 
   // Player refs
-  const playerRef = useRef<HTMLVideoElement>(null)
+  const waveformRef = useRef<WaveformPlayerHandle>(null)
+  const videoRef = useRef<HTMLVideoElement>(null)
   const rafId = useRef<number | null>(null)
   const segmentsRef = useRef<StreamingSegment[]>([])
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -93,6 +95,16 @@ export function TranscribePage() {
   useEffect(() => {
     segmentsRef.current = segments
   }, [segments])
+
+  // Memoize total character count to avoid repeated reduce() in render
+  const totalChars = useMemo(
+    () => segments.reduce((sum, s) => sum + s.text.length, 0),
+    [segments],
+  )
+
+  // Detect if the current file is a video (show video player) or audio (show waveform)
+  const videoExts = ["mp4", "avi", "mov", "mkv", "flv", "webm"]
+  const isVideo = fileName ? videoExts.includes(fileName.split(".").pop()?.toLowerCase() ?? "") : false
 
   // Listen for Rust-side drag-drop events (Tauri v2 DragDropEvent)
   useEffect(() => {
@@ -165,12 +177,6 @@ export function TranscribePage() {
   }, [])
 
   useEffect(() => {
-    // Cancel any pending release timer from a previous visit
-    if (window.__velocitext_release_timer) {
-      clearTimeout(window.__velocitext_release_timer)
-      window.__velocitext_release_timer = undefined
-    }
-
     // Trigger lazy loading of ASR models when the Transcribe page mounts
     const loadModels = async () => {
       try {
@@ -198,15 +204,10 @@ export function TranscribePage() {
       if (flashTimerRef.current) clearTimeout(flashTimerRef.current)
       if (rafId.current) cancelAnimationFrame(rafId.current)
 
-      // Start 5-minute timer to release ASR models after leaving the page
-      window.__velocitext_release_timer = setTimeout(async () => {
-        try {
-          await invoke("release_asr_models")
-          console.log("[ASR] models released after 5 min inactivity")
-        } catch {
-          // ignore (might be running or already released)
-        }
-      }, 5 * 60 * 1000)
+      // Release ASR models immediately when leaving the Transcribe page
+      invoke("release_asr_models").catch(() => {
+        // ignore (might be running or already released)
+      })
     }
   }, [startInitPolling])
 
@@ -324,25 +325,24 @@ export function TranscribePage() {
   }
 
   // ── Player sync ─────────────────────────────────────────────────────────
-  const startPlayerSync = () => {
+  const lastActiveRowRef = useRef(-1)
+
+  // Video player sync via requestAnimationFrame
+  const startVideoSync = useCallback(() => {
     if (rafId.current) return
     setActiveRowIdx(-1)
-    let lastActive = -1
+    lastActiveRowRef.current = -1
 
     const tick = () => {
-      const player = playerRef.current
+      const player = videoRef.current
       if (!player || player.paused || player.ended) {
         rafId.current = null
         return
       }
-
       const currentTime = player.currentTime
       const idx = findSegmentIndex(segmentsRef.current, currentTime)
-
       setActiveSubtitle(idx >= 0 ? segmentsRef.current[idx].text : "")
-
-      // Update row highlight only on change
-      if (idx !== lastActive) {
+      if (idx !== lastActiveRowRef.current) {
         setActiveRowIdx(idx)
         if (idx >= 0 && tableBodyRef.current) {
           const rows = tableBodyRef.current.querySelectorAll("tr")
@@ -350,53 +350,82 @@ export function TranscribePage() {
             rows[idx].scrollIntoView({ block: "nearest" })
           }
         }
-        lastActive = idx
+        lastActiveRowRef.current = idx
       }
-
       rafId.current = requestAnimationFrame(tick)
     }
-
     rafId.current = requestAnimationFrame(tick)
-  }
+  }, [])
 
-  const stopPlayerSync = () => {
+  const stopVideoSync = useCallback(() => {
     if (rafId.current) {
       cancelAnimationFrame(rafId.current)
       rafId.current = null
     }
-  }
+  }, [])
 
-  const handlePlayerPause = () => {
-    stopPlayerSync()
-    // Still show subtitle on pause
-    const player = playerRef.current
-    if (player) {
-      const idx = findSegmentIndex(segmentsRef.current, player.currentTime)
-      setActiveSubtitle(idx >= 0 ? segmentsRef.current[idx].text : "")
+  // Audio waveform sync via WaveformPlayer onTimeUpdate callback
+  const handleTimeUpdate = useCallback((currentTime: number) => {
+    const idx = findSegmentIndex(segmentsRef.current, currentTime)
+    setActiveSubtitle(idx >= 0 ? segmentsRef.current[idx].text : "")
+    if (idx !== lastActiveRowRef.current) {
+      setActiveRowIdx(idx)
+      if (idx >= 0 && tableBodyRef.current) {
+        const rows = tableBodyRef.current.querySelectorAll("tr")
+        if (idx < rows.length) {
+          rows[idx].scrollIntoView({ block: "nearest" })
+        }
+      }
+      lastActiveRowRef.current = idx
     }
-  }
+  }, [])
 
-  const handlePlayerEnded = () => {
-    stopPlayerSync()
+  const handlePlayerPause = useCallback(() => {
+    if (isVideo) {
+      stopVideoSync()
+      const player = videoRef.current
+      if (player) {
+        const idx = findSegmentIndex(segmentsRef.current, player.currentTime)
+        setActiveSubtitle(idx >= 0 ? segmentsRef.current[idx].text : "")
+      }
+    } else {
+      const player = waveformRef.current
+      if (player) {
+        const idx = findSegmentIndex(segmentsRef.current, player.getCurrentTime())
+        setActiveSubtitle(idx >= 0 ? segmentsRef.current[idx].text : "")
+      }
+    }
+  }, [isVideo, stopVideoSync])
+
+  const handlePlayerEnded = useCallback(() => {
+    if (isVideo) stopVideoSync()
     setActiveSubtitle("")
     setActiveRowIdx(-1)
-  }
+  }, [isVideo, stopVideoSync])
 
   // ── Row click → seek ───────────────────────────────────────────────────
   const handleRowClick = (segIdx: number) => {
-    const player = playerRef.current
-    if (!player || segIdx >= segmentsRef.current.length) return
-
-    player.pause()
+    if (segIdx >= segmentsRef.current.length) return
     const t = Math.max(0, segmentsRef.current[segIdx].start - 0.3)
-    player.currentTime = t
-    player.addEventListener(
-      "seeked",
-      () => {
-        player.play().catch(() => {})
-      },
-      { once: true },
-    )
+
+    if (isVideo) {
+      const player = videoRef.current
+      if (!player) return
+      player.pause()
+      player.currentTime = t
+      player.addEventListener(
+        "seeked",
+        () => {
+          player.play().catch(() => {})
+        },
+        { once: true },
+      )
+    } else {
+      const player = waveformRef.current
+      if (!player) return
+      player.seekTo(t)
+      player.play()
+    }
   }
 
   // ── Save segment as WAV ────────────────────────────────────────────────
@@ -568,11 +597,11 @@ export function TranscribePage() {
 
   // ── Clear ──────────────────────────────────────────────────────────────
   const handleClear = () => {
-    stopPlayerSync()
+    stopVideoSync()
     if (pollTimerRef.current) clearInterval(pollTimerRef.current)
     pollTimerRef.current = null
-    if (playerRef.current) {
-      playerRef.current.src = ""
+    if (videoRef.current) {
+      videoRef.current.src = ""
     }
     setTranscribeState("idle")
     setProgress(0)
@@ -689,7 +718,7 @@ export function TranscribePage() {
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
                     {segments.length > 0
-                      ? `${t("transcribe.segmentsWithCount", { count: String(segments.length) })} · ${segments.reduce((sum, s) => sum + s.text.length, 0)} chars`
+                      ? `${t("transcribe.segmentsWithCount", { count: String(segments.length) })} · ${totalChars} chars`
                       : t("transcribe.decoding")}
                   </p>
                 </div>
@@ -706,15 +735,22 @@ export function TranscribePage() {
               {/* Player preview during processing */}
               {playerUrl && (
                 <div className="sticky top-0 z-10 bg-background pb-2">
-                  <div className="relative rounded-lg overflow-hidden bg-black">
-                    {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-                    <video
-                      ref={playerRef}
-                      src={playerUrl}
-                      controls
-                      className="w-full max-h-[240px]"
+                  {isVideo ? (
+                    <div className="relative rounded-lg overflow-hidden bg-black">
+                      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                      <video
+                        ref={videoRef}
+                        src={playerUrl}
+                        controls
+                        className="w-full max-h-[240px]"
+                      />
+                    </div>
+                  ) : (
+                    <WaveformPlayer
+                      ref={waveformRef}
+                      url={playerUrl}
                     />
-                  </div>
+                  )}
                 </div>
               )}
 
@@ -835,24 +871,34 @@ export function TranscribePage() {
               {/* Built-in player — sticky to stay visible when scrolling segments */}
               {filePath && transcribeState === "completed" && playerUrl && (
                 <div className="sticky top-0 z-10 bg-background pb-2">
-                  <div className="relative rounded-lg overflow-hidden bg-black">
-                    {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-                    <video
-                      ref={playerRef}
-                      src={playerUrl}
-                      controls
-                      className="w-full max-h-[320px]"
-                      onPlay={startPlayerSync}
+                  {isVideo ? (
+                    <div className="relative rounded-lg overflow-hidden bg-black">
+                      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                      <video
+                        ref={videoRef}
+                        src={playerUrl}
+                        controls
+                        className="w-full max-h-[320px]"
+                        onPlay={startVideoSync}
+                        onPause={handlePlayerPause}
+                        onEnded={handlePlayerEnded}
+                      />
+                      {activeSubtitle && (
+                        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 max-w-[90%] px-3 py-1 bg-black/70 text-white text-sm rounded text-center pointer-events-none whitespace-pre-wrap">
+                          {activeSubtitle}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <WaveformPlayer
+                      ref={waveformRef}
+                      url={playerUrl}
+                      subtitle={activeSubtitle}
+                      onTimeUpdate={handleTimeUpdate}
                       onPause={handlePlayerPause}
                       onEnded={handlePlayerEnded}
                     />
-                    {/* Subtitle overlay — positioned above controls */}
-                    {activeSubtitle && (
-                      <div className="absolute bottom-10 left-1/2 -translate-x-1/2 max-w-[90%] px-3 py-1 bg-black/70 text-white text-sm rounded text-center pointer-events-none whitespace-pre-wrap">
-                        {activeSubtitle}
-                      </div>
-                    )}
-                  </div>
+                  )}
                 </div>
               )}
 
@@ -862,7 +908,7 @@ export function TranscribePage() {
               <div className="flex items-center justify-between">
                 <p className="text-xs text-muted-foreground">
                   {t("transcribe.segmentsWithCount", { count: String(segments.length) })} ·{" "}
-                  {segments.reduce((sum, s) => sum + s.text.length, 0)} chars
+                  {totalChars} chars
                 </p>
               </div>
 

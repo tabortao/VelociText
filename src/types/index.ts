@@ -149,13 +149,6 @@ export interface InitStatus {
   numThreads: number;
 }
 
-// Global window extension for ASR model release timer
-declare global {
-  interface Window {
-    __velocitext_release_timer?: ReturnType<typeof setTimeout>;
-  }
-}
-
 /** VAD 可调参数 */
 export interface VadSettings {
   threshold: number;

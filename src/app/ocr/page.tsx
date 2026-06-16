@@ -102,6 +102,13 @@ export function OCRPage({ onScreenshotTrigger }: OCRPageProps) {
       }
     }
     load()
+
+    // Release OCR engine when leaving the OCR page to free ~400MB ONNX Runtime memory
+    return () => {
+      invoke("ocr_release").catch(() => {
+        // ignore (might already be released)
+      })
+    }
   }, [])
 
   // Listen for screenshot OCR results

@@ -33,6 +33,7 @@ fn build_ocr_session(builder: SessionBuilder) -> Result<SessionBuilder, ort::Err
 /// References snow-shot's `convert_rgba_to_rgb`.
 fn convert_rgba_to_rgb(image: &[u8]) -> Vec<u8> {
     let pixel_count = image.len() / 4;
+    debug_assert!(image.len() % 4 == 0, "RGBA image data must be divisible by 4");
     let mut rgb_data = Vec::with_capacity(pixel_count * 3);
 
     unsafe {
@@ -316,8 +317,7 @@ impl OcrEngine {
     ) -> AppResult<OcrResult> {
         let start = std::time::Instant::now();
 
-        let mut image = img.clone();
-        let long_side = image.width().max(image.height());
+        let long_side = img.width().max(img.height());
 
         // PaddleOCR optimal detection size is around 960px.
         // For small images, scale up for better accuracy.
@@ -325,33 +325,45 @@ impl OcrEngine {
         const OCR_TARGET_SIZE: u32 = 960;
         const OCR_MAX_SIZE: u32 = 1920;
 
-        if long_side < OCR_TARGET_SIZE {
-            // Small image: scale up to 1.5x for better OCR accuracy
-            let target_scale_factor = 1.5;
-            if scale_factor < target_scale_factor && scale_factor > 0.0 {
-                let resize_factor = target_scale_factor / scale_factor;
-                image = image.resize(
-                    (image.width() as f32 * resize_factor) as u32,
-                    (image.height() as f32 * resize_factor) as u32,
+        // Only clone the image when scaling is actually needed.
+        // Using a conditional owned image avoids unnecessary multi-MB allocations
+        // for images in the 960-1920px sweet spot.
+        let need_resize = long_side < OCR_TARGET_SIZE || long_side > OCR_MAX_SIZE;
+        let owned_image;
+        let image: &image::DynamicImage = if need_resize {
+            let mut tmp = img.clone();
+            if long_side < OCR_TARGET_SIZE {
+                // Small image: scale up to 1.5x for better OCR accuracy
+                let target_scale_factor = 1.5;
+                if scale_factor < target_scale_factor && scale_factor > 0.0 {
+                    let resize_factor = target_scale_factor / scale_factor;
+                    tmp = tmp.resize(
+                        (tmp.width() as f32 * resize_factor) as u32,
+                        (tmp.height() as f32 * resize_factor) as u32,
+                        image::imageops::FilterType::Lanczos3,
+                    );
+                }
+            } else {
+                // Large image: scale down to OCR_MAX_SIZE for faster processing
+                let scale = OCR_MAX_SIZE as f32 / long_side as f32;
+                tmp = tmp.resize(
+                    (tmp.width() as f32 * scale) as u32,
+                    (tmp.height() as f32 * scale) as u32,
                     image::imageops::FilterType::Lanczos3,
                 );
             }
-        } else if long_side > OCR_MAX_SIZE {
-            // Large image: scale down to OCR_MAX_SIZE for faster processing
-            let scale = OCR_MAX_SIZE as f32 / long_side as f32;
-            image = image.resize(
-                (image.width() as f32 * scale) as u32,
-                (image.height() as f32 * scale) as u32,
-                image::imageops::FilterType::Lanczos3,
-            );
-        }
-        // Images between 960-1920px: use as-is (already in a good range)
+            owned_image = tmp;
+            &owned_image
+        } else {
+            // Images between 960-1920px: use as-is (already in a good range)
+            img
+        };
 
         let max_size = image.height().max(image.width());
 
         // Convert to RGB — using parallel conversion for RGBA, standard for RGB
         let image_buffer = match image {
-            image::DynamicImage::ImageRgb8(rgb) => rgb,
+            image::DynamicImage::ImageRgb8(rgb) => rgb.clone(),
             image::DynamicImage::ImageRgba8(rgba) => {
                 let rgb_data = convert_rgba_to_rgb(rgba.as_raw());
                 image::RgbImage::from_raw(rgba.width(), rgba.height(), rgb_data)
