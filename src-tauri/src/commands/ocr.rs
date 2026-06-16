@@ -107,6 +107,7 @@ pub async fn capture_all_monitors() -> Result<serde_json::Value, String> {
 
 /// Run OCR on a cropped region of a captured screenshot.
 /// The frontend provides the crop coordinates after user selection.
+/// Also saves the cropped region as a temp PNG for preview display.
 #[tauri::command]
 pub async fn ocr_screenshot_region(
     image_path: String,
@@ -116,7 +117,7 @@ pub async fn ocr_screenshot_region(
     height: u32,
     model_version: String,
     state: tauri::State<'_, AppState>,
-) -> Result<OcrResult, String> {
+) -> Result<serde_json::Value, String> {
     let model_path = {
         let config = state.config.lock().map_err(|e| e.to_string())?;
         config.model_path.clone()
@@ -141,10 +142,18 @@ pub async fn ocr_screenshot_region(
         // Crop the selected region
         let cropped = img.crop_imm(x, y, width, height);
 
+        // Save cropped region to temp file for preview
+        let cropped_path = std::env::temp_dir().join("velocitext_screenshot_crop.png");
+        cropped
+            .save(&cropped_path)
+            .map_err(|e| format!("Failed to save cropped screenshot: {e}"))?;
+
+        let cropped_path_str = cropped_path.to_string_lossy().to_string();
+
         let mut guard = engine_arc.lock().map_err(|e| e.to_string())?;
-        if let Some(ref mut eng) = *guard {
+        let result = if let Some(ref mut eng) = *guard {
             eng.recognize_from_image(&cropped, 1.0)
-                .map_err(|e| e.to_string())
+                .map_err(|e| e.to_string())?
         } else {
             let mut eng =
                 OcrEngine::new_with_memory(&model_dir, false).map_err(|e| e.to_string())?;
@@ -152,8 +161,14 @@ pub async fn ocr_screenshot_region(
                 .recognize_from_image(&cropped, 1.0)
                 .map_err(|e| e.to_string());
             *guard = Some(eng);
-            result
-        }
+            result?
+        };
+
+        // Return OcrResult along with the cropped image path
+        Ok(serde_json::json!({
+            "ocrResult": result,
+            "croppedImagePath": cropped_path_str,
+        }))
     })
     .await
     .map_err(|e| format!("Screenshot OCR failed: {e}"))?
@@ -320,12 +335,22 @@ pub async fn close_screenshot_window(app: tauri::AppHandle) -> Result<(), String
 
 /// Called from the screenshot window after OCR completes.
 /// Emits the result to the main window so it can display the result.
+/// Includes the cropped screenshot path for preview display.
+/// When the main window is hidden (minimized to tray), shows a desktop toast notification.
 #[tauri::command]
 pub async fn screenshot_ocr_done(
     app: tauri::AppHandle,
     text: String,
     time_ms: u64,
+    cropped_image_path: Option<String>,
+    ocr_result: Option<serde_json::Value>,
 ) -> Result<(), String> {
+    // Check if main window is visible
+    let main_visible = app
+        .get_webview_window("main")
+        .map(|w| w.is_visible().unwrap_or(false))
+        .unwrap_or(false);
+
     // Emit to the main window specifically
     if let Some(main_window) = app.get_webview_window("main") {
         main_window
@@ -334,11 +359,111 @@ pub async fn screenshot_ocr_done(
                 serde_json::json!({
                     "text": text,
                     "timeMs": time_ms,
+                    "croppedImagePath": cropped_image_path,
+                    "ocrResult": ocr_result,
                 }),
             )
             .map_err(|e| format!("Failed to emit screenshot-ocr-result: {e}"))?;
     }
+
+    // If main window is not visible (minimized to tray), show a desktop toast
+    if !main_visible && !text.is_empty() {
+        show_desktop_toast(&app, "文本复制成功");
+    }
+
     Ok(())
+}
+
+/// Show a desktop toast notification by creating a small transparent overlay window.
+/// The window auto-closes after 2 seconds via a Rust-side timer.
+fn show_desktop_toast(app: &tauri::AppHandle, message: &str) {
+    let html_content = format!(
+        r#"<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><style>
+* {{ margin: 0; padding: 0; box-sizing: border-box; }}
+body {{
+  background: transparent;
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+}}
+.toast {{
+  background: #dcfce7;
+  color: #166534;
+  padding: 10px 24px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  font-family: system-ui, -apple-system, sans-serif;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  border: 1px solid #bbf7d0;
+  text-align: center;
+  white-space: nowrap;
+  animation: fadeIn 0.3s ease;
+}}
+@keyframes fadeIn {{ from {{ opacity: 0; }} to {{ opacity: 1; }} }}
+</style></head>
+<body><div class="toast">{message}</div></body></html>"#
+    );
+
+    // Save HTML to temp file
+    let temp_html = std::env::temp_dir().join("velocitext_toast.html");
+    if std::fs::write(&temp_html, &html_content).is_ok() {
+        // Get primary monitor dimensions for positioning
+        let monitors = xcap::Monitor::all().ok();
+        let (screen_w, screen_h) = if let Some(ref mons) = monitors {
+            if let Some(primary) = mons.first() {
+                (primary.width() as f64, primary.height() as f64)
+            } else {
+                (1920.0, 1080.0)
+            }
+        } else {
+            (1920.0, 1080.0)
+        };
+
+        // Estimate toast size
+        let toast_w = 300.0;
+        let toast_h = 50.0;
+        let pos_x = (screen_w - toast_w) / 2.0;
+        let pos_y = screen_h * 0.18;
+
+        let url = tauri::WebviewUrl::External(
+            format!("file:///{}", temp_html.to_string_lossy())
+                .parse()
+                .unwrap(),
+        );
+
+        if let Ok(_toast_window) = tauri::WebviewWindowBuilder::new(app, "toast", url)
+            .title("VelociText Toast")
+            .inner_size(toast_w, toast_h)
+            .position(pos_x, pos_y)
+            .transparent(true)
+            .decorations(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .resizable(false)
+            .shadow(false)
+            .focused(false)
+            .build()
+        {
+            log::info!("[show_desktop_toast] toast window created");
+
+            // Auto-close after 2.3 seconds via Rust timer
+            let app_clone = app.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(2300));
+                if let Some(window) = app_clone.get_webview_window("toast") {
+                    let _ = window.close();
+                    log::info!("[show_desktop_toast] toast window auto-closed");
+                }
+            });
+        }
+    }
 }
 
 /// Inner implementation of capture_all_monitors (reusable without tauri::State).

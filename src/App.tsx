@@ -121,14 +121,19 @@ export default function App() {
         unlistenResult = await listen<{
           text: string
           timeMs: number
+          croppedImagePath?: string
+          ocrResult?: {
+            textBlocks: Array<{ text: string; confidence: number; boxPoints: unknown }>
+            totalTimeMs: number
+          }
         }>("screenshot-ocr-result", (event) => {
-          const { text, timeMs } = event.payload
+          const { text, timeMs, croppedImagePath, ocrResult } = event.payload
           // Only navigate to OCR page and show result if window is visible
           if (document.visibilityState === "visible") {
             setCurrentPage("ocr")
             window.dispatchEvent(
               new CustomEvent("velocitext:screenshot-ocr-result", {
-                detail: { text, timeMs },
+                detail: { text, timeMs, croppedImagePath, ocrResult },
               })
             )
           }

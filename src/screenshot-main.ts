@@ -108,19 +108,27 @@ document.addEventListener("mouseup", async (e: MouseEvent) => {
       width: Math.round(w),
       height: Math.round(h),
       modelVersion,
-    })) as { textBlocks: Array<{ text: string; confidence: number }>; totalTimeMs: number };
+    })) as {
+      ocrResult: {
+        textBlocks: Array<{ text: string; confidence: number; boxPoints: unknown }>;
+        totalTimeMs: number;
+      };
+      croppedImagePath: string;
+    };
 
-    const text = result.textBlocks.map((b: { text: string }) => b.text).join("\n");
+    const text = result.ocrResult.textBlocks.map((b: { text: string }) => b.text).join("\n");
 
     // Copy to clipboard via Rust command
     if (text) {
       await invoke("copy_text_to_clipboard", { text });
     }
 
-    // Notify main window about the result
+    // Notify main window about the result (including cropped image path and full OCR result)
     await invoke("screenshot_ocr_done", {
       text,
-      timeMs: result.totalTimeMs,
+      timeMs: result.ocrResult.totalTimeMs,
+      croppedImagePath: result.croppedImagePath,
+      ocrResult: result.ocrResult,
     });
   } catch (err) {
     console.error("Screenshot OCR failed:", err);

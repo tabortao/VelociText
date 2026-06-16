@@ -98,24 +98,29 @@ export function OCRPage({ onScreenshotTrigger }: OCRPageProps) {
   // Listen for screenshot OCR results
   useEffect(() => {
     const handler = (e: Event) => {
-      const { text, timeMs } = (e as CustomEvent).detail
+      const { text, timeMs, croppedImagePath, ocrResult } = (e as CustomEvent).detail
       if (text) {
         const screenshotItem: BatchOcrItem = {
           path: "",
           fileName: t("ocr.screenshotBtn"),
-          imageUrl: "",
+          imageUrl: croppedImagePath ? convertFileSrc(croppedImagePath) : "",
           state: "completed",
-          result: {
-            textBlocks: [{ text, confidence: 1.0, boxPoints: [] }],
-            totalTimeMs: timeMs,
-          },
+          result: ocrResult
+            ? {
+                textBlocks: ocrResult.textBlocks,
+                totalTimeMs: ocrResult.totalTimeMs,
+              }
+            : {
+                textBlocks: [{ text, confidence: 1.0, boxPoints: [] }],
+                totalTimeMs: timeMs,
+              },
           error: null,
         }
         setItems([screenshotItem])
         setExpandedIdx(0)
         showFlash(
           t("ocr.completedToast", {
-            blocks: 1,
+            blocks: screenshotItem.result?.textBlocks.length ?? 1,
             time: (timeMs / 1000).toFixed(1),
           })
         )
