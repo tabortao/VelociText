@@ -17,5 +17,5 @@
 - [X] 添加批量OCR功能。
 - [ ] 提供API接口，支持其他应用调用OCR、ASR等功能。https://tauri.app/plugin/http-client/
 - [ ] 提供CLI工具，支持批量行调用OCR、ASR等功能。https://tauri.app/plugin/cli/
-- [ ] 提供PDF文档OCR功能。依赖https://github.com/ajrcarey/pdfium-render 和 https://github.com/bblanchon/pdfium-binaries
+- [X] 提供PDF文档OCR功能。依赖https://github.com/ajrcarey/pdfium-render 和 https://github.com/bblanchon/pdfium-binaries
 
