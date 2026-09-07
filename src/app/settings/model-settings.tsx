@@ -4,14 +4,13 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Badge } from "@/components/ui/badge"
-import { CpuIcon, DownloadIcon, CheckCircleIcon, FolderOpenIcon, ZapIcon } from "lucide-react"
+import { CpuIcon, DownloadIcon, FolderOpenIcon, ZapIcon } from "lucide-react"
 import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
 import { useAppContext } from "@/lib/app-context"
 import type { AppConfig, ModelInfo, DownloadProgress } from "@/types"
 
 const ASR_MODELS = ["sense-voice-small", "paraformer", "qwen3-asr"] as const
-const OCR_MODELS = ["ppocr-v4", "ppocr-v5", "ppocr-v6"] as const
 
 export function ModelSettingsPage() {
   const { t } = useAppContext()
@@ -23,7 +22,6 @@ export function ModelSettingsPage() {
   const [activeModel, setActiveModel] = useState<string>("")
   const [switching, setSwitching] = useState(false)
   const [selectedAsr, setSelectedAsr] = useState<string>("sense-voice-small")
-  const [selectedOcr, setSelectedOcr] = useState<string>("ppocr-v5")
 
   const getModel = (name: string) => models.find((m) => m.name === name)
   const isInstalled = (name: string) => getModel(name)?.installed ?? false
@@ -210,63 +208,6 @@ export function ModelSettingsPage() {
             </div>
             {(() => {
               const sm = getModel(selectedAsr)
-              if (sm && sm.installed && sm.path) {
-                return (
-                  <p className="text-xs text-muted-foreground">
-                    {sm.path}
-                  </p>
-                )
-              }
-              return null
-            })()}
-          </div>
-
-          {/* OCR Model Selection */}
-          <div className="space-y-3 pt-3 border-t">
-            <h4 className="text-sm font-medium text-muted-foreground">OCR</h4>
-            <div className="flex items-center gap-3">
-              <select
-                value={selectedOcr}
-                onChange={(e) => setSelectedOcr(e.target.value)}
-                className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm flex-1"
-              >
-                {OCR_MODELS.map((key) => {
-                  const model = getModel(key)
-                  return (
-                    <option key={key} value={key}>
-                      {model?.displayName ?? key}{isInstalled(key) ? " ✓" : " (not installed)"}
-                    </option>
-                  )
-                })}
-              </select>
-
-              {(() => {
-                const selectedModel = getModel(selectedOcr)
-                if (!selectedModel) return null
-
-                if (!selectedModel.installed) {
-                  return (
-                    <Button
-                      onClick={() => handleDownload(selectedOcr)}
-                      disabled={downloading !== null}
-                      size="sm"
-                    >
-                      <DownloadIcon className="size-4 mr-1" />
-                      {downloading === selectedOcr ? t("models.downloading") : t("models.download")}
-                    </Button>
-                  )
-                }
-
-                return (
-                  <Badge variant="outline" className="h-8 px-3 gap-1 border-green-300 dark:border-green-700">
-                    <CheckCircleIcon className="size-3 text-green-600 dark:text-green-400" />
-                    <span className="text-green-700 dark:text-green-300">{t("models.installed")}</span>
-                  </Badge>
-                )
-              })()}
-            </div>
-            {(() => {
-              const sm = getModel(selectedOcr)
               if (sm && sm.installed && sm.path) {
                 return (
                   <p className="text-xs text-muted-foreground">

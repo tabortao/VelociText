@@ -24,13 +24,6 @@ pub struct AppConfig {
     /// 活跃 OCR 模型: "ppocr-v4" | "ppocr-v5" | "ppocr-v6"
     #[serde(default = "default_active_ocr_model")]
     pub active_ocr_model: String,
-    /// OCR 截图快捷键 (如 "Ctrl+Shift+O")
-    #[serde(default = "default_ocr_screenshot_shortcut")]
-    pub ocr_screenshot_shortcut: String,
-}
-
-fn default_ocr_screenshot_shortcut() -> String {
-    "Ctrl+Shift+O".to_string()
 }
 
 fn default_active_ocr_model() -> String {
@@ -54,7 +47,6 @@ impl Default for AppConfig {
             active_model: default_active_model(),
             sidebar_collapsed: false,
             active_ocr_model: default_active_ocr_model(),
-            ocr_screenshot_shortcut: default_ocr_screenshot_shortcut(),
         }
     }
 }

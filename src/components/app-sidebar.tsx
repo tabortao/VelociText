@@ -14,7 +14,7 @@ import {
 import {
   MicIcon,
   BookOpenIcon,
-  ScanTextIcon,
+  CaptionsIcon,
   Settings2Icon,
   CpuIcon,
   InfoIcon,
@@ -36,8 +36,8 @@ const labels = {
   zh: {
     features: "功能",
     transcribe: "转录",
+    subtitle: "转字幕",
     dictionary: "词典",
-    ocr: "文本识别",
     settingsLabel: "设置",
     settings: "设置",
     models: "模型管理",
@@ -46,8 +46,8 @@ const labels = {
   en: {
     features: "Features",
     transcribe: "Transcribe",
+    subtitle: "Subtitles",
     dictionary: "Dictionary",
-    ocr: "Text Recognition",
     settingsLabel: "Settings",
     settings: "Settings",
     models: "Models",
@@ -69,8 +69,8 @@ export function AppSidebar({
   }, [])
 
   const mainNav = [
-    { id: "ocr" as Page, title: l.ocr, icon: ScanTextIcon },
     { id: "transcribe" as Page, title: l.transcribe, icon: MicIcon },
+    { id: "subtitle" as Page, title: l.subtitle, icon: CaptionsIcon },
   ]
 
   const settingsNav = [
@@ -88,7 +88,7 @@ export function AppSidebar({
               asChild
               className="data-[slot=sidebar-menu-button]:p-1.5!"
             >
-              <a href="#" onClick={(e) => { e.preventDefault(); onNavigate("ocr") }}>
+              <a href="#" onClick={(e) => { e.preventDefault(); onNavigate("transcribe") }}>
                 <CommandIcon className="size-5!" />
                 <span className="text-base font-semibold">VelociText</span>
               </a>

@@ -1,8 +1,8 @@
 # VelociText
 
-> **极致离线视频/音频转文字 & 文字识别工具**
+> **极致离线视频/音频转文字工具**
 
-VelociText 是一款极速、跨平台的离线语音识别和文字识别桌面应用。基于 [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) 引擎，支持 SenseVoice-Small 和 Paraformer-Large 双 ASR 模型，同时集成 PaddleOCR（V4/V5/V6）文字识别 — 所有处理完全在本地完成。**无需联网，数据隐私无忧。**
+VelociText 是一款极速、跨平台的离线语音识别桌面应用。基于 [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) 引擎，支持 SenseVoice-Small 和 Paraformer-Large 双 ASR 模型。
 
 ## 功能特性
 
@@ -14,12 +14,6 @@ VelociText 是一款极速、跨平台的离线语音识别和文字识别桌面
 - **智能 VAD** — Silero VAD 语音活动检测，毫秒级精度识别语音段落。
 - **流式管线** — 增量音频解码 + VAD + ASR，实时进度显示，低内存占用。
 - **多格式导出** — 支持导出为 TXT（带时间戳）、SRT、VTT 字幕文件。
-
-### 文字识别（OCR）
-- **PaddleOCR 模型** — 支持 PP-OCR V4、V5、V6 ONNX 模型，一键下载。
-- **图片 OCR** — 拖放或文件选择器加载图片（PNG、JPG、BMP、WEBP、TIFF）进行文字识别。
-- **截图 OCR** — 按全局快捷键（默认 `Ctrl+Shift+O`）截取任意屏幕区域，自动识别文字并复制到剪贴板。支持多显示器。
-- **词典纠错** — 自定义热词词典，用于 OCR 后文本纠正。
 
 ### 应用特性
 - **系统托盘** — 关闭窗口最小化到系统托盘，左键恢复，右键退出。
@@ -35,9 +29,7 @@ VelociText 是一款极速、跨平台的离线语音识别和文字识别桌面
 | 桌面框架 | [Tauri v2](https://v2.tauri.app)（Rust 后端） |
 | 前端 | React 19 + TypeScript + [shadcn/ui](https://ui.shadcn.com) |
 | ASR 引擎 | [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) v1.13 |
-| OCR 引擎 | [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) via [paddle-ocr-rs](https://github.com/mg-chao/paddle-ocr-rs) |
 | 语音模型 | SenseVoice-Small（q8 量化，约 230MB）+ Paraformer-Large（int8 量化，约 238MB）+ Qwen3-ASR |
-| OCR 模型 | PP-OCR V4/V5/V6 ONNX（每个约 25MB） |
 | VAD 模型 | Silero VAD ONNX（约 2.7MB） |
 | 音视频解码 | [symphonia](https://github.com/pdeljanov/Symphonia)（纯 Rust，无需 FFmpeg） |
 | 截图捕获 | [xcap](https://github.com/nicepkg/xcap)（多显示器支持） |
@@ -51,7 +43,6 @@ VelociText 是一款极速、跨平台的离线语音识别和文字识别桌面
 - [x] Paraformer-Large ONNX — 更高精度的中文语音识别模型
 - [x] 模型切换 UI（SenseVoice ↔ Paraformer ↔ Qwen3-ASR）
 - [x] 纯 Rust 音视频解码（symphonia，无 FFmpeg 依赖）
-- [x] OCR 文字识别（PaddleOCR V4/V5/V6）
 - [x] 截图 OCR（全局快捷键 + 多显示器支持）
 - [x] 系统托盘和单实例运行
 - [ ] 说话人分离（Speaker Diarization）
@@ -104,8 +95,6 @@ MIT
 VelociText 的构建得益于以下优秀开源项目：
 
 - [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) — 核心 ASR 推理引擎，驱动离线语音识别
-- [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) — 出色的多语言 OCR 工具
-- [paddle-ocr-rs](https://github.com/mg-chao/paddle-ocr-rs) — PaddleOCR ONNX 推理的 Rust 绑定
 - [SenseVoice](https://github.com/FunAudioLLM/SenseVoice) — FunAudioLLM 多语言语音识别模型
 - [Paraformer](https://www.modelscope.cn/models/iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-onnx) — 阿里达摩院高精度中文语音识别模型
 - [Silero VAD](https://github.com/snakers4/silero-vad) — 语音活动检测模型，用于语音分段

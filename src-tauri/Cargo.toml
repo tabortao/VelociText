@@ -85,9 +85,6 @@ tauri-plugin-clipboard-manager = "2"
 # 剪贴板 (used directly for reliable clipboard access)
 arboard = "3"
 
-# 全局快捷键 (screenshot OCR when app is minimized)
-tauri-plugin-global-shortcut = "2"
-
 # 单实例 (prevent multiple instances, activate existing window)
 tauri-plugin-single-instance = "2"
 
