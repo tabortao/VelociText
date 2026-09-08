@@ -13,16 +13,15 @@ use symphonia::core::formats::FormatReader;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::probe::Hint;
 
+/// Opened audio source: (format reader, decoder, track id, channel count, sample rate).
+pub type OpenedAudio =
+    (Box<dyn FormatReader>, Box<dyn Decoder>, u32, usize, u32);
+
 /// Open an audio/video file and return the format reader, decoder, and track info.
 /// Supports MP3, FLAC, AAC, OGG, WAV, MP4, MKV, WebM, AIFF, and more via symphonia.
-pub fn open_audio_file(
-    path: &str,
-) -> AppResult<(Box<dyn FormatReader>, Box<dyn Decoder>, u32, usize, u32)> {
+pub fn open_audio_file(path: &str) -> AppResult<OpenedAudio> {
     let src = File::open(path).map_err(|e| {
-        AppError::Io(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!("Cannot open file: {e}"),
-        ))
+        AppError::Io(std::io::Error::other(format!("Cannot open file: {e}")))
     })?;
     let mss = MediaSourceStream::new(Box::new(src), Default::default());
 
@@ -152,7 +151,7 @@ pub fn write_wav(path: &str, samples: &[f32]) -> AppResult<()> {
     let data_size = num_samples * 2;
     let file_size = 36 + data_size;
 
-    let f = File::create(path).map_err(|e| AppError::Io(e))?;
+    let f = File::create(path).map_err(AppError::Io)?;
     let mut w = std::io::BufWriter::new(f);
 
     w.write_all(b"RIFF").map_err(AppError::Io)?;
@@ -172,7 +171,7 @@ pub fn write_wav(path: &str, samples: &[f32]) -> AppResult<()> {
     w.write_all(&data_size.to_le_bytes())
         .map_err(AppError::Io)?;
     for &s in samples {
-        let clamped = s.max(-1.0).min(1.0);
+        let clamped = s.clamp(-1.0, 1.0);
         let pcm = (clamped * 32767.0) as i16;
         w.write_all(&pcm.to_le_bytes()).map_err(AppError::Io)?;
     }
@@ -249,11 +248,7 @@ pub fn decode_time_range(path: &str, start: f32, end: f32) -> AppResult<Vec<f32>
             continue;
         }
 
-        let copy_start = if chunk_start >= start_sample {
-            0
-        } else {
-            start_sample - chunk_start
-        };
+        let copy_start = start_sample.saturating_sub(chunk_start);
         let copy_end = (end_sample - chunk_start).min(pcm.len());
 
         if copy_start < copy_end {

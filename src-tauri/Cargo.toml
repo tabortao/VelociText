@@ -50,9 +50,6 @@ symphonia = { version = "0.5", features = [
 # 异步运行时
 tokio = { version = "1", features = ["full"] }
 
-# 文件处理
-tempfile = "3"
-
 # 解压 zip 模型包 (supports deflate + xz compression)
 zip = { version = "2", features = ["deflate", "xz"] }
 
@@ -69,28 +66,8 @@ ureq = { version = "2", features = ["tls"] }
 # 7z 解压 (FFmpeg 下载)
 sevenz-rust = "0.6"
 
-# OCR (PaddleOCR via ONNX Runtime)
-# paddle-ocr-rs 0.6.1 is incompatible with ort >= 2.0.0-rc.11 due to API changes
-# Pin ort to rc.10 which is the version paddle-ocr-rs was built against
-paddle-ocr-rs = "0.6"
-ort = { version = "=2.0.0-rc.10", default-features = false }
-num_cpus = "1.17"
-image = "0.25"
-rayon = "1.10"
-
-# 截图 (cross-platform screen capture, references snow-shot)
-xcap = "0.3"
-tauri-plugin-clipboard-manager = "2"
-
-# 剪贴板 (used directly for reliable clipboard access)
-arboard = "3"
-
 # 单实例 (prevent multiple instances, activate existing window)
 tauri-plugin-single-instance = "2"
-
-# PDF 渲染 (将 PDF 页面渲染为图片后进行 OCR)
-# 使用 Google Chromium 的 PDFium 引擎，需要 pdfium.dll
-pdfium-render = "0.8"
 
 
 [profile.dev]

@@ -18,7 +18,7 @@ fn download_file(
 
     // Check HTTP status code — bail early on non-2xx to avoid writing error pages as zip files
     let status = resp.status();
-    if status < 200 || status >= 300 {
+    if !(200..300).contains(&status) {
         return Err(AppError::ModelDownload(format!(
             "Server returned HTTP {} for URL: {}. The model file may not exist on the server yet.",
             status, url
@@ -54,7 +54,7 @@ fn download_file(
                 downloaded,
                 total,
                 percentage,
-                stage: format!("Downloading..."),
+                stage: "Downloading...".to_string(),
             });
         }
     }
@@ -112,12 +112,6 @@ pub fn is_model_installed_at(dir: &Path) -> bool {
     find_model_file(dir).is_some() && dir.join("tokens.txt").exists()
 }
 
-/// Check if PaddleOCR models are installed at the given directory.
-/// Requires `detection.onnx` and `recognition.onnx`.
-pub fn is_ppocr_installed_at(dir: &Path) -> bool {
-    dir.join("detection.onnx").exists() && dir.join("recognition.onnx").exists()
-}
-
 /// Check if Qwen3-ASR model is installed at the given directory.
 pub fn is_qwen3_asr_installed_at(dir: &Path) -> bool {
     let has_conv_frontend = dir.join("conv_frontend.onnx").exists();
@@ -150,15 +144,6 @@ impl ModelManager {
 
         let silero_vad_path = Path::new(&self.models_dir).join("silero-vad");
         let silero_vad_installed = is_silero_vad_installed_at(&silero_vad_path);
-
-        let ppocr_v4_path = Path::new(&self.models_dir).join("ppocr-v4");
-        let ppocr_v4_installed = is_ppocr_installed_at(&ppocr_v4_path);
-
-        let ppocr_v5_path = Path::new(&self.models_dir).join("ppocr-v5");
-        let ppocr_v5_installed = is_ppocr_installed_at(&ppocr_v5_path);
-
-        let ppocr_v6_path = Path::new(&self.models_dir).join("ppocr-v6");
-        let ppocr_v6_installed = is_ppocr_installed_at(&ppocr_v6_path);
 
         vec![
             ModelInfo {
@@ -205,55 +190,7 @@ impl ModelManager {
                     None
                 },
             },
-            ModelInfo {
-                name: "ppocr-v4".into(),
-                display_name: "PaddleOCR V4".into(),
-                size: "~20MB".into(),
-                installed: ppocr_v4_installed,
-                path: if ppocr_v4_installed {
-                    Some(ppocr_v4_path.to_string_lossy().to_string())
-                } else {
-                    None
-                },
-            },
-            ModelInfo {
-                name: "ppocr-v5".into(),
-                display_name: "PaddleOCR V5".into(),
-                size: "~20MB".into(),
-                installed: ppocr_v5_installed,
-                path: if ppocr_v5_installed {
-                    Some(ppocr_v5_path.to_string_lossy().to_string())
-                } else {
-                    None
-                },
-            },
-            ModelInfo {
-                name: "ppocr-v6".into(),
-                display_name: "PaddleOCR V6".into(),
-                size: "~20MB".into(),
-                installed: ppocr_v6_installed,
-                path: if ppocr_v6_installed {
-                    Some(ppocr_v6_path.to_string_lossy().to_string())
-                } else {
-                    None
-                },
-            },
         ]
-    }
-
-    /// 检查指定模型是否已安装
-    pub fn is_model_installed(&self, model_name: &str) -> bool {
-        let model_path = Path::new(&self.models_dir).join(model_name);
-        is_model_installed_at(&model_path)
-    }
-
-    /// 获取模型路径
-    pub fn get_model_path(&self, model_name: &str) -> AppResult<String> {
-        let model_path = Path::new(&self.models_dir).join(model_name);
-        if !self.is_model_installed(model_name) {
-            return Err(AppError::ModelNotDownloaded(model_name.into()));
-        }
-        Ok(model_path.to_string_lossy().to_string())
     }
 
     /// 下载模型文件
@@ -679,119 +616,6 @@ impl ModelManager {
 
         on_progress(DownloadProgress {
             model_name: "qwen3-asr".into(),
-            downloaded: 100,
-            total: 100,
-            percentage: 100.0,
-            stage: "completed".into(),
-        });
-
-        Ok(model_dir.to_string_lossy().to_string())
-    }
-
-    /// Download PaddleOCR ONNX model from gitcode.com.
-    ///
-    /// Downloads a zip archive containing `detection.onnx`, `recognition.onnx`,
-    /// and optionally `cls.onnx`, then extracts them to the model directory.
-    pub fn download_ppocr(
-        &self,
-        model_name: &str,
-        on_progress: &dyn Fn(DownloadProgress),
-    ) -> AppResult<String> {
-        let model_dir = Path::new(&self.models_dir).join(model_name);
-        std::fs::create_dir_all(&model_dir)?;
-
-        // Check if already installed
-        if is_ppocr_installed_at(&model_dir) {
-            on_progress(DownloadProgress {
-                model_name: model_name.into(),
-                downloaded: 100,
-                total: 100,
-                percentage: 100.0,
-                stage: "completed".into(),
-            });
-            return Ok(model_dir.to_string_lossy().to_string());
-        }
-
-        // Download zip from gitcode.com
-        let archive_url = format!(
-            "https://gitcode.com/tabortao/VelociText/releases/download/model/{}.zip",
-            model_name
-        );
-
-        on_progress(DownloadProgress {
-            model_name: model_name.into(),
-            downloaded: 0,
-            total: 0,
-            percentage: 0.0,
-            stage: format!("Downloading {} model archive...", model_name),
-        });
-
-        let temp_dir = std::env::temp_dir();
-        let archive_path = temp_dir.join(format!("{}.zip", model_name));
-
-        download_file(&archive_url, &archive_path, model_name, on_progress)?;
-
-        on_progress(DownloadProgress {
-            model_name: model_name.into(),
-            downloaded: 100,
-            total: 100,
-            percentage: 90.0,
-            stage: "Extracting...".into(),
-        });
-
-        // Extract zip
-        let file = std::fs::File::open(&archive_path)
-            .map_err(|e| AppError::ModelDownload(format!("Open archive failed: {}", e)))?;
-        let mut archive = zip::ZipArchive::new(file)
-            .map_err(|e| AppError::ModelDownload(format!("Read zip archive failed: {}", e)))?;
-
-        for i in 0..archive.len() {
-            let mut entry = archive
-                .by_index(i)
-                .map_err(|e| AppError::ModelDownload(format!("Read zip entry failed: {}", e)))?;
-
-            let name = entry.name().to_string();
-            if entry.is_dir() {
-                continue;
-            }
-
-            let entry_path = std::path::Path::new(&name);
-            let filename = entry_path
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default();
-
-            let is_model_file = filename == "detection.onnx"
-                || filename == "recognition.onnx"
-                || filename == "cls.onnx"
-                || filename == "dict.txt";
-
-            if is_model_file {
-                let dest = model_dir.join(&filename);
-                let mut file_content = Vec::new();
-                std::io::Read::read_to_end(&mut entry, &mut file_content)
-                    .map_err(|e| AppError::ModelDownload(format!("Read entry failed: {}", e)))?;
-                std::fs::write(&dest, &file_content)
-                    .map_err(|e| AppError::ModelDownload(format!("Write file failed: {}", e)))?;
-                log::info!(
-                    "[download_ppocr] extracted {} -> {}",
-                    filename,
-                    dest.display()
-                );
-            }
-        }
-
-        // Clean up archive
-        let _ = std::fs::remove_file(&archive_path);
-
-        if !is_ppocr_installed_at(&model_dir) {
-            return Err(AppError::ModelDownload(
-                "Download completed but model file check failed".into(),
-            ));
-        }
-
-        on_progress(DownloadProgress {
-            model_name: model_name.into(),
             downloaded: 100,
             total: 100,
             percentage: 100.0,

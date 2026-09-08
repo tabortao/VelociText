@@ -9,7 +9,6 @@ mod tests;
 
 use config::app_config::AppConfig;
 use config::dictionary_config::DictionaryConfig;
-use engine::ocr::OcrEngine;
 use engine::recognizer_factory::RecognizerFactory;
 use engine::transcription_pipeline::{SegmentResult, VadSettings};
 use sherpa_onnx::OfflineRecognizer;
@@ -49,13 +48,6 @@ pub struct AppState {
     /// Bumped by `ensure_asr_models` (models needed again) and by each new
     /// `release_asr_models` request, so only the latest scheduled release fires.
     pub release_token: Arc<AtomicU64>,
-    pub active_ocr_model: Arc<Mutex<String>>, // "ppocr-v4" | "ppocr-v5" | "ppocr-v6"
-    /// OCR engine instance (session reuse for performance).
-    /// References snow-shot's OcrService pattern.
-    pub ocr_engine: Arc<Mutex<Option<OcrEngine>>>,
-    /// Pending screenshot data for the screenshot selection window.
-    /// Stored by `start_screenshot_selection`, retrieved by `get_screenshot_data`.
-    pub pending_screenshot: Arc<Mutex<Option<serde_json::Value>>>,
 }
 
 /// Build the ASR recognizer and Silero VAD from the configured model path.
@@ -248,7 +240,7 @@ fn build_models(
                             Ok(Ok(r)) => (r, fb_name),
                             Ok(Err(fe)) => return Err(format!("Fallback also failed: {fe}")),
                             Err(_) => {
-                                return Err(format!("Fallback model panicked during creation"))
+                                return Err("Fallback model panicked during creation".to_string())
                             }
                         }
                     }
@@ -373,7 +365,6 @@ fn create_silero_vad_with_settings(
             min_speech_duration: settings.min_speech_duration,
             window_size: 512,
             max_speech_duration: settings.max_speech_duration,
-            ..Default::default()
         },
         sample_rate: 16000,
         num_threads: 1,
@@ -489,10 +480,7 @@ pub fn run() {
     // the same loaded models without a reload.
     // This reduces startup memory usage from ~500MB to ~50MB.
 
-    let active_ocr_model = initial_config.active_ocr_model.clone();
-
     tauri::Builder::default()
-        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(
             tauri_plugin_log::Builder::new()
                 .targets([
@@ -536,24 +524,15 @@ pub fn run() {
             dictionary_config,
             hotwords_file_path,
             release_token: Arc::new(AtomicU64::new(0)),
-            active_ocr_model: Arc::new(Mutex::new(active_ocr_model)),
-            ocr_engine: Arc::new(Mutex::new(None)),
-            pending_screenshot: Arc::new(Mutex::new(None)),
         })
         .invoke_handler(tauri::generate_handler![
-            // 转录命令
-            commands::transcribe::export_result,
-            commands::transcribe::export_to_file,
-            commands::transcribe::write_text_file,
-            commands::transcribe::open_file_with_system,
-            commands::transcribe::check_ffmpeg,
-            commands::transcribe::check_file_format,
-            commands::transcribe::get_model_types,
-            // 转录命令 (新 — 流式)
+            // 转录命令 (流式)
             commands::transcribe::recognize_file,
             commands::transcribe::get_recognition_progress,
             commands::transcribe::cancel_recognition,
             commands::transcribe::save_segment_as_wav,
+            commands::transcribe::export_to_file,
+            commands::transcribe::check_ffmpeg,
             commands::transcribe::get_vad_settings,
             commands::transcribe::apply_vad_settings,
             // App init
@@ -562,8 +541,6 @@ pub fn run() {
             commands::transcribe::release_asr_models,
             // 模型命令
             commands::model::list_models,
-            commands::model::get_model_path,
-            commands::model::download_model,
             commands::model::download_specific_model,
             commands::model::get_active_model,
             commands::model::set_active_model,
@@ -582,22 +559,6 @@ pub fn run() {
             commands::dictionary::save_hotwords,
             commands::dictionary::save_replacements,
             commands::dictionary::get_hotwords_file_path,
-            // OCR 命令
-            commands::ocr::ocr_recognize,
-            commands::ocr::ocr_recognize_bytes,
-            commands::ocr::capture_all_monitors,
-            commands::ocr::ocr_screenshot_region,
-            commands::ocr::start_screenshot_selection,
-            commands::ocr::get_screenshot_data,
-            commands::ocr::close_screenshot_window,
-            commands::ocr::screenshot_ocr_done,
-            commands::ocr::copy_text_to_clipboard,
-            commands::ocr::ocr_get_active_model,
-            commands::ocr::ocr_set_active_model,
-            commands::ocr::ocr_release,
-            commands::ocr::pdf_get_page_count,
-            commands::ocr::pdf_render_page,
-            commands::ocr::ocr_recognize_pdf,
         ])
         .setup(move |app| {
             // System tray — references snow-shot's tray implementation

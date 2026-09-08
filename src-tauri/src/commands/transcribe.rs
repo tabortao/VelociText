@@ -1,6 +1,5 @@
 use crate::engine::audio_decoder;
 use crate::engine::export::ExportManager;
-use crate::engine::recognizer_factory::RecognizerFactory;
 use crate::engine::transcription_pipeline::{run_recognition, SegmentResult, VadSettings};
 use crate::models::task::TranscribeSegment;
 use crate::AppState;
@@ -30,102 +29,10 @@ pub async fn export_to_file(
     std::fs::write(&save_path, content).map_err(|e| format!("Failed to write file: {}", e))
 }
 
-/// Generic text file writer (used by OCR export, etc.)
-#[tauri::command]
-pub async fn write_text_file(path: String, content: String) -> Result<(), String> {
-    std::fs::write(&path, content).map_err(|e| format!("Failed to write file: {}", e))
-}
-
-/// Open a file with the system's default application
-#[tauri::command]
-pub async fn open_file_with_system(path: String) -> Result<(), String> {
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", &path])
-            .spawn()
-            .map(|_| ())
-            .map_err(|e| format!("Failed to open file: {}", e))
-    }
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open")
-            .arg(&path)
-            .spawn()
-            .map(|_| ())
-            .map_err(|e| format!("Failed to open file: {}", e))
-    }
-    #[cfg(target_os = "linux")]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(&path)
-            .spawn()
-            .map(|_| ())
-            .map_err(|e| format!("Failed to open file: {}", e))
-    }
-}
-
-/// Export transcription result (returns content string, for legacy use)
-#[tauri::command]
-pub async fn export_result(
-    segments: Vec<TranscribeSegment>,
-    format: String,
-) -> Result<String, String> {
-    ExportManager::export(&segments, &format).map_err(|e| e.to_string())
-}
-
 /// Check if FFmpeg is available
 #[tauri::command]
 pub async fn check_ffmpeg() -> Result<String, String> {
     crate::engine::audio_extractor::check_ffmpeg().map_err(|e| e.to_string())
-}
-
-/// Check if file format is supported
-#[tauri::command]
-pub async fn check_file_format(file_path: String) -> Result<bool, String> {
-    Ok(crate::engine::audio_extractor::is_supported_format(
-        &file_path,
-    ))
-}
-
-/// Get available model types
-#[tauri::command]
-pub async fn get_model_types(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
-    let config = state.config.lock().map_err(|e| e.to_string())?;
-    let available = RecognizerFactory::list_available(&config.model_path);
-
-    let all_types = vec![
-        serde_json::json!({
-            "id": "sense-voice",
-            "name": "SenseVoice-Small",
-            "available": available.contains(&"sense-voice-small".to_string()),
-            "default": true
-        }),
-        serde_json::json!({
-            "id": "paraformer-large",
-            "name": "Paraformer-Large",
-            "available": available.contains(&"paraformer-large".to_string()),
-            "default": false
-        }),
-        serde_json::json!({
-            "id": "paraformer",
-            "name": "Paraformer",
-            "available": available.contains(&"paraformer".to_string()),
-            "default": false
-        }),
-        serde_json::json!({
-            "id": "zipformer-ctc",
-            "name": "Zipformer CTC",
-            "available": available.contains(&"zipformer-ctc".to_string()),
-        }),
-        serde_json::json!({
-            "id": "transducer",
-            "name": "Transducer",
-            "available": available.contains(&"transducer".to_string()),
-        }),
-    ];
-
-    Ok(all_types)
 }
 
 // ============================================================================

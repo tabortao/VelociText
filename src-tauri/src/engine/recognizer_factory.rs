@@ -142,7 +142,7 @@ impl RecognizerFactory {
             tokens_file.display()
         );
 
-        let model_config = Self::build_model_config(model_type, &model_file, &base, config);
+        let model_config = Self::build_model_config(model_type, &model_file, base, config);
 
         let recognizer_config = OfflineRecognizerConfig {
             model_config,
@@ -185,7 +185,6 @@ impl RecognizerFactory {
             ModelType::Paraformer => OfflineModelConfig {
                 paraformer: OfflineParaformerModelConfig {
                     model: Some(model_path),
-                    ..Default::default()
                 },
                 tokens: Some(tokens_path),
                 num_threads: config.num_threads as i32,
@@ -223,7 +222,6 @@ impl RecognizerFactory {
             ModelType::ZipformerCtc => OfflineModelConfig {
                 zipformer_ctc: OfflineZipformerCtcModelConfig {
                     model: Some(model_path),
-                    ..Default::default()
                 },
                 tokens: Some(tokens_path),
                 num_threads: config.num_threads as i32,
@@ -237,7 +235,6 @@ impl RecognizerFactory {
                         encoder: Some(base.join("encoder.onnx").to_string_lossy().to_string()),
                         decoder: Some(base.join("decoder.onnx").to_string_lossy().to_string()),
                         joiner: Some(base.join("joiner.onnx").to_string_lossy().to_string()),
-                        ..Default::default()
                     },
                     tokens: Some(tokens_path),
                     num_threads: config.num_threads as i32,

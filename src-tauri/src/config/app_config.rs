@@ -21,9 +21,6 @@ pub struct AppConfig {
     /// 侧边栏是否收起
     #[serde(default)]
     pub sidebar_collapsed: bool,
-    /// 活跃 OCR 模型: "ppocr-v4" | "ppocr-v5" | "ppocr-v6"
-    #[serde(default = "default_active_ocr_model")]
-    pub active_ocr_model: String,
     /// 关闭按钮行为: "tray" (最小化到托盘) | "exit" (退出应用)
     #[serde(default = "default_close_behavior")]
     pub close_behavior: String,
@@ -31,10 +28,6 @@ pub struct AppConfig {
 
 fn default_close_behavior() -> String {
     "tray".to_string()
-}
-
-fn default_active_ocr_model() -> String {
-    "ppocr-v5".to_string()
 }
 
 fn default_active_model() -> String {
@@ -53,7 +46,6 @@ impl Default for AppConfig {
             ffmpeg_path: None,
             active_model: default_active_model(),
             sidebar_collapsed: false,
-            active_ocr_model: default_active_ocr_model(),
             close_behavior: default_close_behavior(),
         }
     }

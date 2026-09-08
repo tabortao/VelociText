@@ -21,17 +21,11 @@ pub enum AppError {
     #[error("不支持的格式: {0}")]
     UnsupportedFormat(String),
 
-    #[error("模型未下载: {0}")]
-    ModelNotDownloaded(String),
-
     #[error("模型下载失败: {0}")]
     ModelDownload(String),
 
     #[error("序列化错误: {0}")]
     Serde(#[from] serde_json::Error),
-
-    #[error("OCR 错误: {0}")]
-    Ocr(String),
 }
 
 pub type AppResult<T> = Result<T, AppError>;

@@ -13,10 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### 优化
 - **转录/转字幕模型共享，不再重复加载**："转录"与"转字幕"页面使用同一套 ASR 模型。模型释放由"离开页面立即释放"改为**延迟释放**机制：离开页面后模型保留在内存中，5 分钟内无使用才真正释放；期间切换到另一页面（或返回）会自动取消挂起的释放，模型原地复用，无需重新加载（此前页面切换会立即卸载再重新加载模型，耗时数秒）。识别运行中的释放请求会被自动跳过。
 - **识别完成后自动回收结果缓冲**：单次识别结束后 60 秒，后端会自动清空并收缩识别结果缓冲区（`segments`），前端已在轮询完成时持有自己的副本，用户无感知；若期间开始了新的识别则自动跳过回收。
+- **修复 Clippy 诊断问题**：修复 `uninit_vec` 错误（OCR 的 RGBA→RGB 转换改用安全的 `par_chunks_exact_mut` 并行实现）及约 20 项 Clippy 警告（不必要的类型转换、冗余闭包、`clamp`/`saturating_sub`/`Range::contains` 惯用法、无效的 `..Default::default()`、文档缩进等），当前 `cargo clippy` 全量零警告。
 
 ### 移除
+- **OCR 功能全量删除**（前端页面已于 v0.1.6 移除，本次清除后端全部残留）：
+  - Rust 端：`engine/ocr` 模块（PaddleOCR 引擎）、`commands/ocr.rs` 全部命令（识别/截图/PDF/剪贴板等 15 个）、`AppState` 中的 `ocr_engine`/`active_ocr_model`/`pending_screenshot` 状态、`AppConfig` 的 `active_ocr_model` 字段（旧配置文件中的该字段会被自动忽略）、`AppError::Ocr` 错误变体、模型管理中的 PaddleOCR 模型（v4/v5/v6）下载与列表项、OCR 集成测试。
+  - 前端：截图 OCR 窗口入口（`screenshot.html`、`src/screenshot-main.ts`）、vite 构建的 screenshot 入口、`@tauri-apps/plugin-clipboard-manager` 依赖及对应 capabilities 权限。
+  - 依赖清理：移除 `paddle-ocr-rs`、`ort`、`pdfium-render`、`xcap`、`arboard`、`image`、`rayon`、`num_cpus`、`tempfile`、`tauri-plugin-clipboard-manager` 共 10 项。安装包体积由 36.8MB 减至 23.7MB（MSI，-35%），NSIS 安装器由 10.3MB 减至 5.3MB（-48%）。
 - **未使用的旧转录命令**：移除 `transcribe_file` 与 `transcribe_batch` 命令（前端早已改用流式 `recognize_file` 架构，旧命令每次调用都会临时创建约 500MB 的独立识别器实例，不再有任何调用方）。
-- **后端死代码清理**：删除 `Transcriber`/`Recognizer`/`ProgressTracker`、`segment_text`、`extract_audio`、`detect_speech_segments` 等仅被旧命令引用的模块与函数，`AppConfig` 中的 `transcriber` 状态一并移除。集成测试改为直接走真实流式管线（symphonia 解码 → Silero VAD → ASR）。
+- **后端死代码清理**：删除 `Transcriber`/`Recognizer`/`ProgressTracker`、`segment_text`、`extract_audio`、`detect_speech_segments`、`write_text_file`/`open_file_with_system`/`export_result`/`check_file_format`/`get_model_types`/`download_model`/`get_model_path` 等无调用方的命令与函数。集成测试改为直接走真实流式管线（symphonia 解码 → Silero VAD → ASR）。
 
 ## [v0.1.6] - 2026-09-07
 

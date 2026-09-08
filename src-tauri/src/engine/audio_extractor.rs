@@ -1,5 +1,4 @@
 use crate::errors::{AppError, AppResult};
-use std::path::Path;
 use std::process::Command;
 
 #[cfg(windows)]
@@ -8,11 +7,6 @@ use std::os::windows::process::CommandExt;
 /// Windows CREATE_NO_WINDOW flag - 防止弹出命令行窗口
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
-
-/// 支持的音频/视频格式
-const SUPPORTED_FORMATS: &[&str] = &[
-    "mp3", "wav", "flac", "ogg", "aac", "m4a", "aiff", "caf", "mp4", "mov", "mkv", "webm",
-];
 
 /// 为 Command 设置后台运行（Windows 不弹黑窗）
 fn hide_window(cmd: &mut Command) {
@@ -40,15 +34,4 @@ pub fn check_ffmpeg() -> AppResult<String> {
         .unwrap_or("ffmpeg")
         .to_string();
     Ok(version)
-}
-
-/// 检查文件格式是否支持
-pub fn is_supported_format(file_path: &str) -> bool {
-    let path = Path::new(file_path);
-    if let Some(ext) = path.extension() {
-        let ext = ext.to_string_lossy().to_lowercase();
-        SUPPORTED_FORMATS.contains(&ext.as_str())
-    } else {
-        false
-    }
 }
