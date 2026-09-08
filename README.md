@@ -2,7 +2,7 @@
 
 > **The Ultimate Offline Video & Audio to Text Transcription**
 
-VelociText is a blazing-fast, cross-platform desktop application for offline speech recognition and text OCR. Powered by [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) with SenseVoice-Small and Paraformer-Large ASR models.
+VelociText is a blazing-fast, cross-platform desktop application for offline speech recognition. Powered by [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) with SenseVoice-Small and Paraformer-Large ASR models.
 
 ## Features
 
@@ -18,7 +18,6 @@ VelociText is a blazing-fast, cross-platform desktop application for offline spe
 ### Application
 - **System Tray** — Closing the window minimizes to the system tray. Left-click to restore, right-click to quit.
 - **Single Instance** — Only one instance can run at a time; launching again activates the existing window.
-- **Global Shortcuts** — Screenshot OCR shortcut works even when the app is minimized or in the tray.
 - **Multi-language UI** — Interface available in English and Chinese.
 - **Model Management** — One-click model download with progress tracking; switch active model at any time.
 
@@ -30,10 +29,8 @@ VelociText is a blazing-fast, cross-platform desktop application for offline spe
 | Frontend | React 19 + TypeScript + [shadcn/ui](https://ui.shadcn.com) |
 | ASR Engine | [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) v1.13 |
 | Speech Models | SenseVoice-Small (q8, ~230MB) + Paraformer-Large (int8, ~238MB) + Qwen3-ASR |
-| OCR Models | PP-OCR V4/V5/V6 ONNX (~25MB each) |
 | VAD Model | Silero VAD ONNX (~2.7MB) |
 | Audio/Video Decoding | [symphonia](https://github.com/pdeljanov/Symphonia) (pure Rust, no FFmpeg needed) |
-| Screenshot Capture | [xcap](https://github.com/nicepkg/xcap) (multi-monitor support) |
 | Build Tool | [Bun](https://bun.sh) + Vite |
 
 ## Roadmap
@@ -44,10 +41,7 @@ VelociText is a blazing-fast, cross-platform desktop application for offline spe
 - [x] Paraformer-Large ONNX — Higher accuracy Mandarin ASR model
 - [x] Model switching UI (SenseVoice ↔ Paraformer ↔ Qwen3-ASR)
 - [x] Pure Rust audio/video decoding (symphonia, no FFmpeg dependency)
-- [x] Screenshot OCR with global shortcut and multi-monitor support
 - [x] System tray and single instance
-- [ ] Speaker diarization (speaker identification)
-- [ ] Custom vocabulary / hotwords UI
 
 ## Quick Start
 

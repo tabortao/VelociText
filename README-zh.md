@@ -32,7 +32,6 @@ VelociText 是一款极速、跨平台的离线语音识别桌面应用。基于
 | 语音模型 | SenseVoice-Small（q8 量化，约 230MB）+ Paraformer-Large（int8 量化，约 238MB）+ Qwen3-ASR |
 | VAD 模型 | Silero VAD ONNX（约 2.7MB） |
 | 音视频解码 | [symphonia](https://github.com/pdeljanov/Symphonia)（纯 Rust，无需 FFmpeg） |
-| 截图捕获 | [xcap](https://github.com/nicepkg/xcap)（多显示器支持） |
 | 构建工具 | [Bun](https://bun.sh) + Vite |
 
 ## 路线图
@@ -43,10 +42,7 @@ VelociText 是一款极速、跨平台的离线语音识别桌面应用。基于
 - [x] Paraformer-Large ONNX — 更高精度的中文语音识别模型
 - [x] 模型切换 UI（SenseVoice ↔ Paraformer ↔ Qwen3-ASR）
 - [x] 纯 Rust 音视频解码（symphonia，无 FFmpeg 依赖）
-- [x] 截图 OCR（全局快捷键 + 多显示器支持）
 - [x] 系统托盘和单实例运行
-- [ ] 说话人分离（Speaker Diarization）
-- [ ] 自定义热词 UI 管理
 
 ## 快速开始
 
