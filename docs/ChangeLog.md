@@ -5,6 +5,19 @@ All notable changes to VelociText will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.1.7] - 2026-09-08
+
+### 新增
+- **关闭按钮行为设置**：设置页面新增"关闭按钮行为"配置项，可选"最小化到托盘"（默认，保持原有行为）或"退出应用"。选择"退出应用"后点击窗口右上角关闭按钮将直接退出程序；旧配置文件自动兼容（缺省按托盘处理）。中英文界面均已适配。
+
+### 优化
+- **转录/转字幕模型共享，不再重复加载**："转录"与"转字幕"页面使用同一套 ASR 模型。模型释放由"离开页面立即释放"改为**延迟释放**机制：离开页面后模型保留在内存中，5 分钟内无使用才真正释放；期间切换到另一页面（或返回）会自动取消挂起的释放，模型原地复用，无需重新加载（此前页面切换会立即卸载再重新加载模型，耗时数秒）。识别运行中的释放请求会被自动跳过。
+- **识别完成后自动回收结果缓冲**：单次识别结束后 60 秒，后端会自动清空并收缩识别结果缓冲区（`segments`），前端已在轮询完成时持有自己的副本，用户无感知；若期间开始了新的识别则自动跳过回收。
+
+### 移除
+- **未使用的旧转录命令**：移除 `transcribe_file` 与 `transcribe_batch` 命令（前端早已改用流式 `recognize_file` 架构，旧命令每次调用都会临时创建约 500MB 的独立识别器实例，不再有任何调用方）。
+- **后端死代码清理**：删除 `Transcriber`/`Recognizer`/`ProgressTracker`、`segment_text`、`extract_audio`、`detect_speech_segments` 等仅被旧命令引用的模块与函数，`AppConfig` 中的 `transcriber` 状态一并移除。集成测试改为直接走真实流式管线（symphonia 解码 → Silero VAD → ASR）。
+
 ## [v0.1.6] - 2026-09-07
 
 ### 修复

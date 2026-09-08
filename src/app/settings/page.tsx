@@ -179,6 +179,24 @@ export function SettingsPage() {
             <Label htmlFor="use-vad">{t("settings.vad")}</Label>
           </div>
 
+          {/* Close button behavior */}
+          <div className="space-y-2">
+            <Label>{t("settings.closeBehavior")}</Label>
+            <Select
+              value={config.closeBehavior || "tray"}
+              onValueChange={(v) => setConfig({ ...config, closeBehavior: v })}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="tray">{t("settings.closeToTray")}</SelectItem>
+                <SelectItem value="exit">{t("settings.closeToExit")}</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">{t("settings.closeBehaviorHint")}</p>
+          </div>
+
           {/* FFmpeg path */}
           <div className="space-y-2">
             <Label htmlFor="ffmpeg-path">{t("settings.ffmpegPath")}</Label>

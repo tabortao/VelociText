@@ -3,9 +3,6 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum AppError {
-    #[error("音频提取失败: {0}")]
-    AudioExtraction(String),
-
     #[error("模型加载失败: {0}")]
     ModelLoad(String),
 

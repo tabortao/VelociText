@@ -67,6 +67,8 @@ export interface AppConfig {
   ffmpegPath: string | null;
   activeModel: string;
   sidebarCollapsed: boolean;
+  /** 关闭按钮行为: "tray" (最小化到托盘) | "exit" (退出应用) */
+  closeBehavior: string;
 }
 
 /** 模型下载进度 */

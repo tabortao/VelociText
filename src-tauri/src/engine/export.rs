@@ -1,67 +1,6 @@
 use crate::errors::AppResult;
 use crate::models::task::TranscribeSegment;
 
-/// 智能分句 - 基于标点符号将长文本拆分为句子
-///
-/// 支持中英文标点：。！？；，、 . ! ? ; ,
-/// 对于纯文本（无时间信息），均匀分配时间跨度
-pub fn segment_text(text: &str, total_duration: f64) -> Vec<TranscribeSegment> {
-    if text.trim().is_empty() {
-        return vec![];
-    }
-
-    let mut segments = Vec::new();
-    let mut current = String::new();
-    let mut char_count = 0;
-    let total_chars = text.chars().count() as f64;
-    let mut segment_start_char = 0usize;
-
-    for ch in text.chars() {
-        current.push(ch);
-        char_count += 1;
-
-        // 句子结束标点
-        let is_sentence_end = matches!(ch, '。' | '！' | '？' | '.' | '!' | '?' | '\n');
-        // 短停顿标点（逗号等），如果积累够了也分段
-        let is_clause_end = matches!(ch, '；' | '，' | ',' | ';');
-
-        let should_split = is_sentence_end || (is_clause_end && current.chars().count() >= 15);
-
-        if should_split {
-            let text = current.trim().to_string();
-            if !text.is_empty() {
-                let start = (segment_start_char as f64 / total_chars) * total_duration;
-                let end = (char_count as f64 / total_chars) * total_duration;
-                segments.push(TranscribeSegment { start, end, text });
-            }
-            segment_start_char = char_count;
-            current.clear();
-        }
-    }
-
-    // 剩余内容
-    let remaining = current.trim().to_string();
-    if !remaining.is_empty() {
-        let start = (segment_start_char as f64 / total_chars) * total_duration;
-        segments.push(TranscribeSegment {
-            start,
-            end: total_duration,
-            text: remaining,
-        });
-    }
-
-    // 如果分句后没有结果（全是无标点连续文本），返回整段
-    if segments.is_empty() {
-        segments.push(TranscribeSegment {
-            start: 0.0,
-            end: total_duration,
-            text: text.trim().to_string(),
-        });
-    }
-
-    segments
-}
-
 /// 导出管理器 - 支持多种格式导出转录结果
 pub struct ExportManager;
 

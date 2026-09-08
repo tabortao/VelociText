@@ -11,12 +11,11 @@ use config::app_config::AppConfig;
 use config::dictionary_config::DictionaryConfig;
 use engine::ocr::OcrEngine;
 use engine::recognizer_factory::RecognizerFactory;
-use engine::transcriber::Transcriber;
 use engine::transcription_pipeline::{SegmentResult, VadSettings};
 use sherpa_onnx::OfflineRecognizer;
 use std::io::Write;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, AtomicU64};
 use std::sync::{Arc, Mutex};
 use tauri::webview::PageLoadEvent;
 use tauri::{Emitter, Manager, WindowEvent};
@@ -27,7 +26,6 @@ use tauri_plugin_opener::OpenerExt;
 
 pub struct AppState {
     pub config: Mutex<AppConfig>,
-    pub transcriber: Mutex<Transcriber>,
 
     // Streaming transcription state
     pub recognizer: Arc<Mutex<Option<OfflineRecognizer>>>,
@@ -38,7 +36,7 @@ pub struct AppState {
     pub status: Arc<Mutex<String>>, // "idle" | "processing" | "done" | "cancelled" | "error:..."
     pub segments: Arc<Mutex<Vec<SegmentResult>>>,
     pub audio_path: Arc<Mutex<String>>,
-    pub init_status: Arc<AtomicU8>, // 0=pending, 1=ready, 2=error
+    pub init_status: Arc<AtomicU8>, // 0=pending, 1=ready, 2=error, 3=released
     pub init_error: Arc<Mutex<String>>,
     pub num_threads: Arc<AtomicU32>,
     pub vad_settings: Arc<Mutex<VadSettings>>,
@@ -47,6 +45,10 @@ pub struct AppState {
     pub active_model: Arc<Mutex<String>>, // "sense-voice-small" | "paraformer" | "qwen3-asr"
     pub dictionary_config: Arc<Mutex<DictionaryConfig>>,
     pub hotwords_file_path: Arc<Mutex<Option<String>>>,
+    /// Token used to cancel a pending deferred model release.
+    /// Bumped by `ensure_asr_models` (models needed again) and by each new
+    /// `release_asr_models` request, so only the latest scheduled release fires.
+    pub release_token: Arc<AtomicU64>,
     pub active_ocr_model: Arc<Mutex<String>>, // "ppocr-v4" | "ppocr-v5" | "ppocr-v6"
     /// OCR engine instance (session reuse for performance).
     /// References snow-shot's OcrService pattern.
@@ -481,8 +483,10 @@ pub fn run() {
         Arc::new(Mutex::new(initial_config.active_model.clone()));
 
     // ASR models are now lazy-loaded via `ensure_asr_models` command
-    // when the user navigates to the Transcribe page.
-    // They are released after 5 minutes of inactivity via `release_asr_models`.
+    // when the user navigates to the Transcribe / Subtitle page.
+    // Leaving those pages schedules a deferred release (`release_asr_models`)
+    // after 5 minutes of inactivity — switching between the two pages shares
+    // the same loaded models without a reload.
     // This reduces startup memory usage from ~500MB to ~50MB.
 
     let active_ocr_model = initial_config.active_ocr_model.clone();
@@ -512,7 +516,6 @@ pub fn run() {
         .plugin(external_navigation_plugin())
         .manage(AppState {
             config: Mutex::new(initial_config),
-            transcriber: Mutex::new(Transcriber::new()),
 
             // Streaming state
             recognizer,
@@ -532,14 +535,13 @@ pub fn run() {
             active_model,
             dictionary_config,
             hotwords_file_path,
+            release_token: Arc::new(AtomicU64::new(0)),
             active_ocr_model: Arc::new(Mutex::new(active_ocr_model)),
             ocr_engine: Arc::new(Mutex::new(None)),
             pending_screenshot: Arc::new(Mutex::new(None)),
         })
         .invoke_handler(tauri::generate_handler![
-            // 转录命令 (旧)
-            commands::transcribe::transcribe_file,
-            commands::transcribe::transcribe_batch,
+            // 转录命令
             commands::transcribe::export_result,
             commands::transcribe::export_to_file,
             commands::transcribe::write_text_file,
@@ -650,9 +652,24 @@ pub fn run() {
             }
         })
         .on_window_event(|window, event| {
-            // Close to tray instead of quitting (only for main window)
+            // Respect the user-configured close behavior for the main window:
+            // "tray" = hide to system tray (default), "exit" = quit the app.
             if let WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" {
+                    let behavior = window
+                        .app_handle()
+                        .try_state::<AppState>()
+                        .and_then(|state| {
+                            state.config.lock().ok().map(|c| c.close_behavior.clone())
+                        })
+                        .unwrap_or_else(|| "tray".to_string());
+
+                    if behavior == "exit" {
+                        window.app_handle().exit(0);
+                        return;
+                    }
+
+                    // Default: minimize to tray
                     api.prevent_close();
                     let _ = window.hide();
                     return;
