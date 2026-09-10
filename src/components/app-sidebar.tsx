@@ -15,6 +15,7 @@ import {
   MicIcon,
   BookOpenIcon,
   CaptionsIcon,
+  AudioLinesIcon,
   Settings2Icon,
   CpuIcon,
   InfoIcon,
@@ -37,6 +38,7 @@ const labels = {
     features: "功能",
     transcribe: "转录",
     subtitle: "转字幕",
+    audioConvert: "转音频",
     dictionary: "词典",
     settingsLabel: "设置",
     settings: "设置",
@@ -47,6 +49,7 @@ const labels = {
     features: "Features",
     transcribe: "Transcribe",
     subtitle: "Subtitles",
+    audioConvert: "Audio Convert",
     dictionary: "Dictionary",
     settingsLabel: "Settings",
     settings: "Settings",
@@ -71,6 +74,7 @@ export function AppSidebar({
   const mainNav = [
     { id: "transcribe" as Page, title: l.transcribe, icon: MicIcon },
     { id: "subtitle" as Page, title: l.subtitle, icon: CaptionsIcon },
+    { id: "audio-convert" as Page, title: l.audioConvert, icon: AudioLinesIcon },
   ]
 
   const settingsNav = [

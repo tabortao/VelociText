@@ -29,9 +29,21 @@ pub async fn export_to_file(
     std::fs::write(&save_path, content).map_err(|e| format!("Failed to write file: {}", e))
 }
 
-/// Check if FFmpeg is available
+/// Check if FFmpeg is available: the explicit path from the config first,
+/// then the system PATH.
 #[tauri::command]
-pub async fn check_ffmpeg() -> Result<String, String> {
+pub async fn check_ffmpeg(state: State<'_, AppState>) -> Result<String, String> {
+    let explicit = {
+        let config = state.config.lock().map_err(|e| e.to_string())?;
+        config.ffmpeg_path.clone()
+    };
+    if let Some(path) = explicit {
+        if !path.is_empty() {
+            if let Ok(version) = crate::engine::audio_extractor::check_ffmpeg_at(&path) {
+                return Ok(version);
+            }
+        }
+    }
     crate::engine::audio_extractor::check_ffmpeg().map_err(|e| e.to_string())
 }
 

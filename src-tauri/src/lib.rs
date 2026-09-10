@@ -48,6 +48,10 @@ pub struct AppState {
     /// Bumped by `ensure_asr_models` (models needed again) and by each new
     /// `release_asr_models` request, so only the latest scheduled release fires.
     pub release_token: Arc<AtomicU64>,
+
+    // Audio conversion state (video → audio via FFmpeg)
+    pub audio_convert_cancel: Arc<AtomicBool>,
+    pub audio_convert_child: Arc<Mutex<Option<std::process::Child>>>,
 }
 
 /// Build the ASR recognizer and Silero VAD from the configured model path.
@@ -524,6 +528,8 @@ pub fn run() {
             dictionary_config,
             hotwords_file_path,
             release_token: Arc::new(AtomicU64::new(0)),
+            audio_convert_cancel: Arc::new(AtomicBool::new(false)),
+            audio_convert_child: Arc::new(Mutex::new(None)),
         })
         .invoke_handler(tauri::generate_handler![
             // 转录命令 (流式)
@@ -535,6 +541,10 @@ pub fn run() {
             commands::transcribe::check_ffmpeg,
             commands::transcribe::get_vad_settings,
             commands::transcribe::apply_vad_settings,
+            // 音频转换命令 (视频 → 音频)
+            commands::audio_convert::convert_to_audio,
+            commands::audio_convert::cancel_audio_convert,
+            commands::audio_convert::get_audio_formats,
             // App init
             commands::transcribe::get_init_status,
             commands::transcribe::ensure_asr_models,

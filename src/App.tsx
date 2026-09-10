@@ -8,6 +8,7 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import { SiteHeader } from "@/components/site-header"
 import { TranscribePage } from "@/app/transcribe/page"
 import { SubtitlePage } from "@/app/subtitle/page"
+import { AudioConvertPage } from "@/app/audio-convert/page"
 import { DictionaryPage } from "@/app/dictionary/page"
 import { SettingsPage } from "@/app/settings/page"
 import { ModelSettingsPage } from "@/app/settings/model-settings"
@@ -16,7 +17,7 @@ import { AppProvider } from "@/lib/app-context"
 import { invoke } from "@tauri-apps/api/core"
 import type { AppConfig } from "@/types"
 
-export type Page = "transcribe" | "subtitle" | "dictionary" | "settings" | "model-settings" | "about"
+export type Page = "transcribe" | "subtitle" | "audio-convert" | "dictionary" | "settings" | "model-settings" | "about"
 
 export default function App() {
   const [currentPage, setCurrentPage] = useState<Page>("transcribe")
@@ -53,6 +54,8 @@ export default function App() {
         return <TranscribePage />
       case "subtitle":
         return <SubtitlePage />
+      case "audio-convert":
+        return <AudioConvertPage />
       case "dictionary":
         return <DictionaryPage />
       case "settings":

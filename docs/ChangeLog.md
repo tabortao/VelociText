@@ -5,6 +5,14 @@ All notable changes to VelociText will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.1.8] - 2026-09-10
+
+### 新增
+- **"转音频"页面**：功能区新增独立页面（位于"转字幕"下方）。选择一个或多个视频文件，选择目标音频格式（默认 MP3，另支持 WAV、FLAC、M4A、OGG、OPUS、WMA），点击"转音频"即可调用 FFmpeg 批量提取音频并转换格式，输出文件保存到源文件所在文件夹（同名换扩展名）。支持拖拽添加文件、文件列表管理（移除/清空）、逐文件实时转换进度（基于 FFmpeg `-progress` 解析的百分比）、整体进度条与批量完成汇总提示；处理过程中可随时停止，停止会终止 FFmpeg 进程并自动清理未完成的输出文件。FFmpeg 优先使用设置页配置的路径；未检测到 FFmpeg 时页面内提供一键下载。中英文界面均已适配。
+
+### 修复
+- **FFmpeg 检测忽略已配置路径**：`check_ffmpeg` 命令现优先检测设置页配置的 FFmpeg 路径（例如通过"下载 FFmpeg"安装到应用数据目录的副本），检测不到时才回退到系统 PATH。修复下载安装 FFmpeg 后设置页仍显示"未找到"的问题。
+
 ## [v0.1.7] - 2026-09-08
 
 ### 新增
