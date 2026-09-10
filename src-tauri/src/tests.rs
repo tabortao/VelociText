@@ -100,4 +100,81 @@ mod transcribe_integration {
 
         println!("  PASS: Full streaming transcription pipeline works!");
     }
+
+    /// Regression test for the "incomplete transcription" bug (v0.1.8):
+    /// a 2:13 video with alternating narration and song was only transcribed
+    /// up to ~65s. Root causes fixed:
+    /// 1. Silero VAD LSTM state poisoning — music made later speech
+    ///    undetectable (fixed by stale-state reset during audible non-speech).
+    /// 2. Song lyrics are invisible to VAD (fixed by gap backfill ASR).
+    ///
+    /// Asserts the transcription covers >90% of the audio duration.
+    #[test]
+    fn test_streaming_transcribe_reference_mp4() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/Reference/20260910-072127.mp4"
+        );
+        if !std::path::Path::new(path).exists() {
+            eprintln!("SKIP: reference mp4 not found");
+            return;
+        }
+
+        let appdata = std::env::var("APPDATA").unwrap_or_default();
+        let models_dir = std::path::Path::new(&appdata).join("VelociText/models");
+
+        // Mirror production build_models: qwen3-asr is the user's active model
+        let model_dir = models_dir.join("qwen3-asr");
+        if !model_dir.exists() {
+            eprintln!("SKIP: qwen3-asr model not installed");
+            return;
+        }
+
+        let factory_config = RecognizerConfig {
+            model_dir: model_dir.to_string_lossy().to_string(),
+            num_threads: 4,
+            hotwords_file: None,
+            hotwords_score: 1.5,
+            use_itn: true,
+        };
+        let recognizer = RecognizerFactory::create(&ModelType::Qwen3Asr, &factory_config)
+            .expect("Failed to create qwen3-asr recognizer");
+
+        let vad_model_path = models_dir.join("silero-vad").join("model.onnx");
+        let vad_config = VadModelConfig {
+            silero_vad: SileroVadModelConfig {
+                model: Some(vad_model_path.to_string_lossy().to_string()),
+                threshold: 0.2,
+                min_silence_duration: 0.2,
+                min_speech_duration: 0.2,
+                window_size: 512,
+                max_speech_duration: 10.0,
+            },
+            sample_rate: 16000,
+            num_threads: 1,
+            ..Default::default()
+        };
+        let vad = sherpa_onnx::VoiceActivityDetector::create(&vad_config, 120.0)
+            .expect("Failed to create VAD");
+
+        let recognizer = Arc::new(Mutex::new(Some(recognizer)));
+        let vad = Arc::new(Mutex::new(Some(vad)));
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let progress = Arc::new(AtomicU32::new(0));
+        let segments = Arc::new(Mutex::new(Vec::new()));
+
+        let duration = run_recognition(path, &recognizer, &vad, &cancelled, &progress, &segments)
+            .expect("Recognition failed");
+
+        let results = segments.lock().unwrap().clone();
+        println!("  {} segments over {duration:.1}s:", results.len());
+        for s in &results {
+            println!("  [{:7.2} -> {:7.2}] {}", s.start, s.end, s.text);
+        }
+        let last_end = results.last().map(|s| s.end).unwrap_or(0.0);
+        assert!(
+            last_end > duration * 0.9,
+            "transcription incomplete: last segment at {last_end:.1}s of {duration:.1}s"
+        );
+    }
 }

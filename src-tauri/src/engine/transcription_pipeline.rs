@@ -45,11 +45,44 @@ impl Default for VadSettings {
     }
 }
 
+/// Reset the VAD state after this many seconds without detected speech,
+/// but only while the audio is audible (RMS above `VAD_RESET_RMS_THRESHOLD`).
+///
+/// Silero VAD is stateful (LSTM). Music/singing drives its hidden state into
+/// a region where subsequent *real* speech is no longer detected — silently
+/// dropping the rest of the file. Resetting the state during long non-speech
+/// *music* passages keeps the detector usable. Pure silence does not poison
+/// the state, so resets are skipped there to preserve the detector's natural
+/// behavior (segmentation of normal speech is unchanged).
+const VAD_STALE_RESET_SECS: f32 = 2.0;
+
+/// RMS threshold for "audible" audio (speech/music). Windows below this are
+/// treated as silence.
+const VAD_RESET_RMS_THRESHOLD: f32 = 0.01;
+
+/// Gaps between detected speech longer than this are re-recognized with
+/// fixed-size chunks ("gap backfill").
+///
+/// Silero VAD does not fire on singing/rap mixed with background music, so
+/// song lyrics would be lost entirely. The backfill passes those gaps
+/// through the ASR model directly.
+const GAP_BACKFILL_MIN_SECS: f32 = 3.0;
+
+/// Chunk length (seconds) used for gap backfill ASR.
+/// Kept well below the models' max utterance length (~30s) and qwen3-asr's
+/// max_total_len (~39s of audio).
+const GAP_BACKFILL_CHUNK_SECS: f32 = 12.0;
+
 /// Recognize a single VAD speech segment: skip if too short or punctuation-only.
+///
+/// `sample_offset` compensates for VAD state resets: after `vad.reset()` the
+/// segment start indices restart from zero, so the absolute position is
+/// `sample_offset + segment.start()`.
 fn recognize_segment(
     recognizer: &OfflineRecognizer,
     segment: &sherpa_onnx::SpeechSegment,
     segments: &Arc<Mutex<Vec<SegmentResult>>>,
+    sample_offset: usize,
 ) {
     let samples = segment.samples();
     let duration = samples.len() as f32 / 16000.0;
@@ -57,7 +90,7 @@ fn recognize_segment(
         return;
     }
 
-    let start_time = segment.start() as f32 / 16000.0;
+    let start_time = (sample_offset + segment.start().max(0) as usize) as f32 / 16000.0;
     let end_time = start_time + duration;
 
     let stream = recognizer.create_stream();
@@ -80,6 +113,98 @@ fn recognize_segment(
             }
         }
     }
+}
+
+/// Re-recognize the gaps between detected speech segments with the ASR model
+/// directly (fixed-size chunks).
+///
+/// VAD (Silero) does not detect singing/rap over background music, which
+/// would silently drop those parts of the audio. Running the ASR model over
+/// the gaps recovers the lyrics; chunks that yield no text (e.g. pure
+/// instrumental passages) are discarded.
+fn backfill_gaps(
+    path: &str,
+    recognizer: &OfflineRecognizer,
+    audio_duration: f32,
+    cancelled: &AtomicBool,
+    segments: &Arc<Mutex<Vec<SegmentResult>>>,
+) {
+    // Collect gaps (start, end) longer than GAP_BACKFILL_MIN_SECS.
+    let gaps: Vec<(f32, f32)> = {
+        let Ok(segs) = segments.lock() else {
+            return;
+        };
+        let mut gaps = Vec::new();
+        let mut prev_end = 0.0f32;
+        for s in segs.iter() {
+            if s.start - prev_end > GAP_BACKFILL_MIN_SECS {
+                gaps.push((prev_end, s.start));
+            }
+            prev_end = prev_end.max(s.end);
+        }
+        if audio_duration - prev_end > GAP_BACKFILL_MIN_SECS {
+            gaps.push((prev_end, audio_duration));
+        }
+        gaps
+    };
+
+    if gaps.is_empty() {
+        return;
+    }
+
+    log::info!(
+        "[backfill_gaps] {} gap(s) to re-recognize: {:?}",
+        gaps.len(),
+        gaps
+    );
+
+    let chunk_len = (GAP_BACKFILL_CHUNK_SECS * 16000.0) as usize;
+    let mut filled = 0usize;
+
+    for (gap_start, gap_end) in gaps {
+        if cancelled.load(Ordering::Relaxed) {
+            break;
+        }
+        let Ok(samples) = audio_decoder::decode_time_range(path, gap_start, gap_end) else {
+            continue; // decode failure for one gap should not abort the rest
+        };
+
+        for (i, chunk) in samples.chunks(chunk_len).enumerate() {
+            if cancelled.load(Ordering::Relaxed) {
+                break;
+            }
+            let cs = gap_start + i as f32 * GAP_BACKFILL_CHUNK_SECS;
+            let ce = cs + chunk.len() as f32 / 16000.0;
+
+            let stream = recognizer.create_stream();
+            stream.accept_waveform(16000, chunk);
+            recognizer.decode(&stream);
+
+            if let Some(r) = stream.get_result() {
+                let text = r.text.trim().to_string();
+                if !text.is_empty()
+                    && !text
+                        .chars()
+                        .all(|c| c.is_ascii_punctuation() || c.is_ascii_whitespace())
+                {
+                    filled += 1;
+                    if let Ok(mut segs) = segments.lock() {
+                        segs.push(SegmentResult {
+                            start: cs,
+                            end: ce,
+                            text,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // Keep segments ordered by start time after merging backfilled results.
+    if let Ok(mut segs) = segments.lock() {
+        segs.sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap_or(std::cmp::Ordering::Equal));
+    }
+    log::info!("[backfill_gaps] backfilled {filled} segment(s)");
 }
 
 /// Stream audio through VAD + ASR without buffering the entire file.
@@ -146,6 +271,14 @@ pub fn run_recognition(
     let mut vad_buf: Vec<f32> = Vec::new();
     let mut decoded_count: usize = 0;
     let mut last_progress: u32 = 0;
+
+    // VAD state-reset bookkeeping. `reset_offset` is the number of samples
+    // fed to the VAD when it was last reset; segment start indices are
+    // relative to that point, so the absolute position requires this offset.
+    let mut total_fed: usize = 0;
+    let mut reset_offset: usize = 0;
+    let mut samples_since_speech: usize = 0;
+    let stale_reset_samples = (VAD_STALE_RESET_SECS * 16000.0) as usize;
 
     loop {
         if cancelled.load(Ordering::Relaxed) {
@@ -221,12 +354,30 @@ pub fn run_recognition(
                 return Ok(decoded_count as f32 / actual_native_rate as f32);
             }
 
-            vad.accept_waveform(&vad_buf[..window_size]);
+            let win = &vad_buf[..window_size];
+            let rms = (win.iter().map(|&s| s * s).sum::<f32>() / window_size as f32).sqrt();
+            vad.accept_waveform(win);
             vad_buf.drain(..window_size);
+            total_fed += window_size;
+            samples_since_speech += window_size;
 
             while let Some(segment) = vad.front() {
-                recognize_segment(recognizer, &segment, segments);
+                recognize_segment(recognizer, &segment, segments, reset_offset);
                 vad.pop();
+                samples_since_speech = 0;
+            }
+
+            if vad.detected() {
+                samples_since_speech = 0;
+            } else if samples_since_speech >= stale_reset_samples && rms > VAD_RESET_RMS_THRESHOLD
+            {
+                // Audible audio (music) but no speech for a while: reset the
+                // VAD to clear the LSTM state — music can poison it, making
+                // later speech undetectable. Safe here because no segment is
+                // pending (queue drained above) and no speech is in progress.
+                vad.reset();
+                reset_offset = total_fed;
+                samples_since_speech = 0;
             }
         }
 
@@ -251,12 +402,18 @@ pub fn run_recognition(
         }
         vad.flush();
         while let Some(segment) = vad.front() {
-            recognize_segment(recognizer, &segment, segments);
+            recognize_segment(recognizer, &segment, segments, reset_offset);
             vad.pop();
         }
     }
 
     let audio_duration = decoded_count as f32 / actual_native_rate as f32;
+
+    // Gap backfill: recover speech the VAD missed (singing/rap over music).
+    if !cancelled.load(Ordering::Relaxed) && audio_duration > 0.0 {
+        backfill_gaps(path, recognizer, audio_duration, cancelled, segments);
+    }
+
     let final_count = segments.lock().map(|s| s.len()).unwrap_or(0);
     log::info!(
         "[run_recognition] done, total segments: {final_count}, audio_duration: {audio_duration:.2}s, actual_rate: {actual_native_rate}"

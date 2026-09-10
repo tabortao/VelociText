@@ -192,7 +192,8 @@ fn run_conversion(
         let out_time = Arc::clone(&out_time_us);
         let done = Arc::clone(&stdout_done);
         readers.push(std::thread::spawn(move || {
-            for line in BufReader::new(pipe).lines().flatten() {
+            for line in BufReader::new(pipe).lines() {
+                let Ok(line) = line else { break };
                 if let Some(us) = parse_out_time_line(&line) {
                     out_time.store(us, Ordering::Relaxed);
                 }
@@ -208,7 +209,8 @@ fn run_conversion(
         let duration = Arc::clone(&duration_us);
         let tail = Arc::clone(&stderr_tail);
         readers.push(std::thread::spawn(move || {
-            for line in BufReader::new(pipe).lines().flatten() {
+            for line in BufReader::new(pipe).lines() {
+                let Ok(line) = line else { break };
                 if duration.load(Ordering::Relaxed) == 0 {
                     if let Some(us) = parse_duration_line(&line) {
                         duration.store(us, Ordering::Relaxed);
