@@ -264,18 +264,6 @@ export function ModelSettingsPage() {
               {t("models.downloadHint")}
             </div>
           )}
-
-          {/* Manual download hint */}
-          <div className="pt-3 border-t space-y-1">
-            <p className="text-xs text-muted-foreground">
-              {t("models.manualDownloadHint")}
-            </p>
-            {config?.modelPath && (
-              <p className="text-xs text-muted-foreground break-all">
-                {config.modelPath}
-              </p>
-            )}
-          </div>
         </CardContent>
       </Card>
     </div>

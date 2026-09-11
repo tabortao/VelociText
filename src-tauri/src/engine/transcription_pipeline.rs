@@ -105,6 +105,227 @@ fn qwen3_language_name(code: &str) -> Option<&'static str> {
     }
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// Repetition-loop collapse (post-processing for autoregressive ASR models)
+// ────────────────────────────────────────────────────────────────────────────
+
+/// Minimum consecutive occurrences of the same unit before a run is treated
+/// as a decode loop and collapsed. Natural speech rarely repeats the same
+/// word/character this many times ("对对对", "哈哈哈" stay untouched).
+const REPEAT_UNIT_RUN_LIMIT: usize = 6;
+/// Occurrences kept when collapsing a single-unit run.
+const REPEAT_UNIT_KEEP: usize = 3;
+/// Minimum repetitions of a multi-unit phrase before the tail is treated as
+/// a decode loop ("然后然后然后...", "I want to I want to ...").
+const REPEAT_PHRASE_MIN_REPS: usize = 3;
+/// Phrase repetitions kept when collapsing.
+const REPEAT_PHRASE_KEEP: usize = 2;
+/// Maximum phrase length (units) considered for loop detection.
+const REPEAT_PHRASE_MAX_UNITS: usize = 24;
+
+/// A token of ASR output: a repeatable unit (CJK character or alphanumeric
+/// word) or a separator run (whitespace / punctuation).
+#[derive(Debug, Clone, PartialEq)]
+enum AsrTok {
+    Unit(String),
+    Sep(String),
+}
+
+/// CJK ideographs and kana are treated as single-character units so that
+/// Chinese/Japanese loops ("然后然后然后...") are detected as phrase repeats.
+fn is_cjk_unit(c: char) -> bool {
+    matches!(c as u32,
+        0x3040..=0x30FF   // Hiragana + Katakana
+        | 0x3400..=0x4DBF // CJK Extension A
+        | 0x4E00..=0x9FFF // CJK Unified Ideographs
+        | 0xAC00..=0xD7AF // Hangul syllables
+        | 0xF900..=0xFAFF // CJK Compatibility Ideographs
+    )
+}
+
+fn push_sep(sep: &mut String, toks: &mut Vec<AsrTok>) {
+    if !sep.is_empty() {
+        toks.push(AsrTok::Sep(std::mem::take(sep)));
+    }
+}
+
+fn push_word(word: &mut String, toks: &mut Vec<AsrTok>) {
+    if !word.is_empty() {
+        toks.push(AsrTok::Unit(std::mem::take(word)));
+    }
+}
+
+/// Split ASR output into units (CJK chars / alphanumeric words) and
+/// separators (whitespace / punctuation runs).
+fn tokenize_asr_units(text: &str) -> Vec<AsrTok> {
+    let mut toks = Vec::new();
+    let mut word = String::new();
+    let mut sep = String::new();
+    for ch in text.chars() {
+        if is_cjk_unit(ch) {
+            push_word(&mut word, &mut toks);
+            push_sep(&mut sep, &mut toks);
+            toks.push(AsrTok::Unit(ch.to_string()));
+        } else if ch.is_alphanumeric() {
+            push_sep(&mut sep, &mut toks);
+            word.push(ch);
+        } else {
+            push_word(&mut word, &mut toks);
+            sep.push(ch);
+        }
+    }
+    push_word(&mut word, &mut toks);
+    push_sep(&mut sep, &mut toks);
+    toks
+}
+
+/// Collapse runs of ≥ `REPEAT_UNIT_RUN_LIMIT` identical consecutive units
+/// (separated only by separators) down to `REPEAT_UNIT_KEEP` occurrences.
+fn collapse_unit_runs(toks: &mut Vec<AsrTok>) {
+    let mut i = 0;
+    while i < toks.len() {
+        let AsrTok::Unit(u) = &toks[i] else {
+            i += 1;
+            continue;
+        };
+        let u = u.clone();
+        // Extend the run: identical units, arbitrary separators in between.
+        let mut j = i + 1;
+        let mut count = 1usize;
+        while j < toks.len() {
+            match &toks[j] {
+                AsrTok::Sep(_) => j += 1,
+                AsrTok::Unit(v) if v == &u => {
+                    count += 1;
+                    j += 1;
+                }
+                _ => break,
+            }
+        }
+        if count >= REPEAT_UNIT_RUN_LIMIT {
+            // Token index of the `REPEAT_UNIT_KEEP`-th unit occurrence.
+            let keep_tok = {
+                let mut seen = 0usize;
+                toks[i..j]
+                    .iter()
+                    .enumerate()
+                    .find_map(|(k, t)| match t {
+                        AsrTok::Unit(v) if v == &u => {
+                            seen += 1;
+                            (seen == REPEAT_UNIT_KEEP).then_some(i + k)
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or(i)
+            };
+            // Drop everything past the kept occurrence, but keep a following
+            // separator when it carries punctuation ("word, word, word,").
+            let mut drop_start = keep_tok + 1;
+            if let Some(AsrTok::Sep(s)) = toks.get(drop_start) {
+                if !s.chars().all(char::is_whitespace) {
+                    drop_start += 1;
+                }
+            }
+            toks.drain(drop_start..j);
+            i = drop_start;
+        } else {
+            i = j;
+        }
+    }
+}
+
+/// Collapse a suffix of the unit sequence that consists of ≥
+/// `REPEAT_PHRASE_MIN_REPS` repetitions of a multi-unit pattern down to
+/// `REPEAT_PHRASE_KEEP` repetitions. Autoregressive loops run to the end of
+/// the generated text, so checking the tail is sufficient.
+fn collapse_phrase_loops(toks: &mut Vec<AsrTok>) {
+    let unit_pos: Vec<usize> = toks
+        .iter()
+        .enumerate()
+        .filter_map(|(i, t)| match t {
+            AsrTok::Unit(_) => Some(i),
+            _ => None,
+        })
+        .collect();
+    let n = unit_pos.len();
+    if n < REPEAT_PHRASE_MIN_REPS * 2 {
+        return;
+    }
+
+    let unit_at = |i: usize| -> &str {
+        match &toks[unit_pos[i]] {
+            AsrTok::Unit(s) => s,
+            _ => unreachable!(),
+        }
+    };
+
+    let max_l = (n / REPEAT_PHRASE_MIN_REPS).min(REPEAT_PHRASE_MAX_UNITS);
+    for l in 2..=max_l {
+        // Pattern = the last `l` units; the two preceding chunks must match.
+        let chunk_eq = |start: usize| -> bool {
+            (0..l).all(|k| unit_at(start + k) == unit_at(n - l + k))
+        };
+        if !chunk_eq(n - 2 * l) || !chunk_eq(n - 3 * l) {
+            continue;
+        }
+        // Extend the repetition count leftward as far as possible.
+        let mut reps = REPEAT_PHRASE_MIN_REPS;
+        while n >= (reps + 1) * l && chunk_eq(n - (reps + 1) * l) {
+            reps += 1;
+        }
+        // Keep the head plus REPEAT_PHRASE_KEEP repetitions of the pattern.
+        let keep_units = n - (reps - REPEAT_PHRASE_KEEP) * l;
+        let last_kept_tok = unit_pos[keep_units - 1];
+        let mut drop_start = last_kept_tok + 1;
+        if let Some(AsrTok::Sep(s)) = toks.get(drop_start) {
+            if !s.chars().all(char::is_whitespace) {
+                drop_start += 1;
+            }
+        }
+        toks.truncate(drop_start);
+        return;
+    }
+}
+
+/// Collapse pathological repetition loops produced by autoregressive ASR
+/// models (Qwen3-ASR): the same word or character repeated many times in a
+/// row ("the the the ...", "的的的...") or a short phrase repeated
+/// ("然后然后然后...", "I want to I want to ..."). Such loops can fill the
+/// model's entire token budget with garbage — sherpa-onnx exposes no
+/// repetition penalty for Qwen3-ASR, so this runs as a post-processing step
+/// on every recognized segment.
+///
+/// Thresholds are conservative so natural repetitions pass through unchanged:
+/// "对对对", "哈哈哈", "非常好非常好" (phrase twice) and "very very very"
+/// are all kept as-is. Single units repeated ≥ 6 times are truncated to 3
+/// occurrences; a phrase repeated ≥ 3 times at the tail is truncated to 2
+/// repetitions. Non-autoregressive models (SenseVoice, Paraformer) cannot
+/// loop and their output is unaffected.
+pub fn collapse_repetition_loops(text: &str) -> String {
+    let trimmed = text.trim();
+    if trimmed.chars().count() < 4 {
+        return trimmed.to_string();
+    }
+    let mut toks = tokenize_asr_units(trimmed);
+    collapse_unit_runs(&mut toks);
+    collapse_phrase_loops(&mut toks);
+    let collapsed: String = toks
+        .iter()
+        .map(|t| match t {
+            AsrTok::Unit(s) | AsrTok::Sep(s) => s.as_str(),
+        })
+        .collect();
+    let collapsed = collapsed.trim();
+    if collapsed != trimmed {
+        log::debug!(
+            "[repetition-collapse] collapsed decode loop: {} chars -> {} chars",
+            trimmed.chars().count(),
+            collapsed.chars().count()
+        );
+    }
+    collapsed.to_string()
+}
+
 /// Recognize a single VAD speech segment: skip if too short or punctuation-only.
 ///
 /// `sample_offset` compensates for VAD state resets: after `vad.reset()` the
@@ -137,7 +358,7 @@ fn recognize_segment(
     recognizer.decode(&stream);
 
     if let Some(r) = stream.get_result() {
-        let text = r.text.trim().to_string();
+        let text = collapse_repetition_loops(&r.text);
         if !text.is_empty()
             && !text
                 .chars()
@@ -224,7 +445,7 @@ fn backfill_gaps(
             recognizer.decode(&stream);
 
             if let Some(r) = stream.get_result() {
-                let text = r.text.trim().to_string();
+                let text = collapse_repetition_loops(&r.text);
                 if !text.is_empty()
                     && !text
                         .chars()
@@ -274,8 +495,8 @@ pub fn run_recognition(
 ) -> AppResult<f32> {
     // Resolve the language code once; None = auto-detect.
     let language = language_code.and_then(qwen3_language_name);
-    if language.is_some() {
-        log::info!("[run_recognition] language pinned: {}", language.unwrap());
+    if let Some(lang) = language {
+        log::info!("[run_recognition] language pinned: {lang}");
     }
 
     let (mut format_reader, mut decoder, track_id, num_channels_hint, native_rate_hint) =
@@ -472,4 +693,77 @@ pub fn run_recognition(
     );
 
     Ok(audio_duration)
+}
+
+#[cfg(test)]
+mod repetition_tests {
+    use super::collapse_repetition_loops;
+
+    #[test]
+    fn test_collapse_english_word_loop() {
+        assert_eq!(
+            collapse_repetition_loops("okay the the the the the the the the the the"),
+            "okay the the the"
+        );
+    }
+
+    #[test]
+    fn test_collapse_cjk_char_loop() {
+        assert_eq!(
+            collapse_repetition_loops("今天天气很的的的的的的的的的"),
+            "今天天气很的的的"
+        );
+    }
+
+    #[test]
+    fn test_collapse_cjk_phrase_loop() {
+        // "然后" repeated 6 times = [然, 后] × 6 → keep 2 repetitions.
+        assert_eq!(
+            collapse_repetition_loops("首先我们来看然后然后然后然后然后然后"),
+            "首先我们来看然后然后"
+        );
+    }
+
+    #[test]
+    fn test_collapse_english_phrase_loop() {
+        assert_eq!(
+            collapse_repetition_loops(
+                "This is a test I want to go I want to go I want to go I want to go"
+            ),
+            "This is a test I want to go I want to go"
+        );
+    }
+
+    #[test]
+    fn test_collapse_punctuated_word_loop() {
+        assert_eq!(
+            collapse_repetition_loops("yes, yes, yes, yes, yes, yes, yes"),
+            "yes, yes, yes,"
+        );
+    }
+
+    #[test]
+    fn test_keeps_natural_repetition() {
+        assert_eq!(collapse_repetition_loops("对对对，没错"), "对对对，没错");
+        assert_eq!(collapse_repetition_loops("哈哈哈哈，太好笑了"), "哈哈哈哈，太好笑了");
+        assert_eq!(collapse_repetition_loops("非常好非常好"), "非常好非常好");
+        assert_eq!(
+            collapse_repetition_loops("very very very interesting"),
+            "very very very interesting"
+        );
+        assert_eq!(collapse_repetition_loops("Word. Word. Word."), "Word. Word. Word.");
+    }
+
+    #[test]
+    fn test_normal_text_unchanged() {
+        let t = "Hello, world! 2024 你好，世界。日本語テスト";
+        assert_eq!(collapse_repetition_loops(t), t);
+    }
+
+    #[test]
+    fn test_empty_and_short() {
+        assert_eq!(collapse_repetition_loops(""), "");
+        assert_eq!(collapse_repetition_loops("  hi  "), "hi");
+        assert_eq!(collapse_repetition_loops("。。。"), "。。。");
+    }
 }
