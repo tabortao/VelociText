@@ -20,6 +20,8 @@ pub enum ModelType {
     Paraformer,
     /// Qwen3-ASR — 0.6B multilingual ASR (30+ languages)
     Qwen3Asr,
+    /// Qwen3-ASR — 1.7B multilingual ASR (30+ languages, higher accuracy)
+    Qwen3Asr1_7b,
     /// Zipformer CTC — English/Multilingual ASR with CTC
     ZipformerCtc,
     /// Transducer (e.g., Zipformer transducer, Conformer) — general ASR
@@ -33,6 +35,7 @@ impl ModelType {
             ModelType::SenseVoice => "sense-voice-small",
             ModelType::Paraformer => "paraformer",
             ModelType::Qwen3Asr => "qwen3-asr",
+            ModelType::Qwen3Asr1_7b => "qwen3-asr-1.7b",
             ModelType::ZipformerCtc => "zipformer-ctc",
             ModelType::Transducer => "transducer",
         }
@@ -43,7 +46,7 @@ impl ModelType {
         match self {
             ModelType::SenseVoice => &["model.onnx", "model.int8.onnx", "model_q8.onnx"],
             ModelType::Paraformer => &["model.onnx", "model.int8.onnx"],
-            ModelType::Qwen3Asr => &["encoder.int8.onnx", "encoder.onnx"],
+            ModelType::Qwen3Asr | ModelType::Qwen3Asr1_7b => &["encoder.int8.onnx", "encoder.onnx"],
             ModelType::ZipformerCtc => &["model.onnx", "model.int8.onnx"],
             ModelType::Transducer => &["encoder.onnx", "decoder.onnx", "joiner.onnx"],
         }
@@ -54,9 +57,21 @@ impl ModelType {
         match self {
             ModelType::SenseVoice => "SenseVoice-Small",
             ModelType::Paraformer => "Paraformer",
-            ModelType::Qwen3Asr => "Qwen3-ASR",
+            ModelType::Qwen3Asr => "Qwen3-ASR (0.6B)",
+            ModelType::Qwen3Asr1_7b => "Qwen3-ASR (1.7B)",
             ModelType::ZipformerCtc => "Zipformer CTC",
             ModelType::Transducer => "Transducer",
+        }
+    }
+
+    /// Parse a model directory name into a ModelType.
+    pub fn from_dir_name(name: &str) -> Option<Self> {
+        match name {
+            "sense-voice-small" => Some(ModelType::SenseVoice),
+            "paraformer" => Some(ModelType::Paraformer),
+            "qwen3-asr" => Some(ModelType::Qwen3Asr),
+            "qwen3-asr-1.7b" => Some(ModelType::Qwen3Asr1_7b),
+            _ => None,
         }
     }
 }
@@ -117,8 +132,9 @@ impl RecognizerFactory {
                 ))
             })?;
 
-        // Qwen3-ASR needs a tokenizer directory, not a tokens.txt file
-        let tokens_file = if matches!(model_type, ModelType::Qwen3Asr) {
+        // Qwen3-ASR models need a tokenizer directory, not a tokens.txt file
+        let is_qwen3 = matches!(model_type, ModelType::Qwen3Asr | ModelType::Qwen3Asr1_7b);
+        let tokens_file = if is_qwen3 {
             base.join("tokenizer")
         } else {
             base.join("tokens.txt")
@@ -126,7 +142,7 @@ impl RecognizerFactory {
         if !tokens_file.exists() {
             return Err(AppError::ModelLoad(format!(
                 "{} not found in: {}",
-                if matches!(model_type, ModelType::Qwen3Asr) {
+                if is_qwen3 {
                     "tokenizer directory"
                 } else {
                     "tokens.txt"
@@ -192,7 +208,7 @@ impl RecognizerFactory {
                 ..Default::default()
             },
 
-            ModelType::Qwen3Asr => {
+            ModelType::Qwen3Asr | ModelType::Qwen3Asr1_7b => {
                 // Qwen3-ASR requires conv_frontend.onnx, encoder.int8.onnx, decoder.int8.onnx, and tokenizer/
                 let conv_frontend_path = base
                     .join("conv_frontend.onnx")
@@ -255,6 +271,7 @@ impl RecognizerFactory {
             ModelType::SenseVoice,
             ModelType::Paraformer,
             ModelType::Qwen3Asr,
+            ModelType::Qwen3Asr1_7b,
             ModelType::ZipformerCtc,
             ModelType::Transducer,
         ];
@@ -282,6 +299,7 @@ mod tests {
     fn test_model_type_dir_names() {
         assert_eq!(ModelType::SenseVoice.dir_name(), "sense-voice-small");
         assert_eq!(ModelType::Paraformer.dir_name(), "paraformer");
+        assert_eq!(ModelType::Qwen3Asr1_7b.dir_name(), "qwen3-asr-1.7b");
         assert_eq!(ModelType::ZipformerCtc.dir_name(), "zipformer-ctc");
         assert_eq!(ModelType::Transducer.dir_name(), "transducer");
     }
@@ -290,6 +308,21 @@ mod tests {
     fn test_model_type_display_names() {
         assert_eq!(ModelType::SenseVoice.display_name(), "SenseVoice-Small");
         assert_eq!(ModelType::Paraformer.display_name(), "Paraformer");
+        assert_eq!(ModelType::Qwen3Asr.display_name(), "Qwen3-ASR (0.6B)");
+        assert_eq!(ModelType::Qwen3Asr1_7b.display_name(), "Qwen3-ASR (1.7B)");
+    }
+
+    #[test]
+    fn test_model_type_from_dir_name() {
+        assert_eq!(
+            ModelType::from_dir_name("qwen3-asr-1.7b"),
+            Some(ModelType::Qwen3Asr1_7b)
+        );
+        assert_eq!(
+            ModelType::from_dir_name("qwen3-asr"),
+            Some(ModelType::Qwen3Asr)
+        );
+        assert_eq!(ModelType::from_dir_name("unknown"), None);
     }
 
     #[test]

@@ -29,7 +29,10 @@ pub async fn set_active_model(
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     // Validate model name
-    if model_name != "sense-voice-small" && model_name != "paraformer" && model_name != "qwen3-asr"
+    if model_name != "sense-voice-small"
+        && model_name != "paraformer"
+        && model_name != "qwen3-asr"
+        && model_name != "qwen3-asr-1.7b"
     {
         return Err(format!("Unknown model: {model_name}"));
     }
@@ -43,7 +46,7 @@ pub async fn set_active_model(
     let model_dir = Path::new(&model_path).join(&model_name);
     let installed = if model_name == "paraformer" {
         is_paraformer_installed_at(&model_dir)
-    } else if model_name == "qwen3-asr" {
+    } else if model_name == "qwen3-asr" || model_name == "qwen3-asr-1.7b" {
         is_qwen3_asr_installed_at(&model_dir)
     } else {
         is_model_installed_at(&model_dir)
@@ -137,6 +140,17 @@ pub async fn download_specific_model(
                 }
                 manager
                     .download_qwen3_asr(&|progress| {
+                        let _ = app_handle_clone.emit("model-download-progress", progress.clone());
+                    })
+                    .map_err(|e| e.to_string())?;
+            }
+            "qwen3-asr-1.7b" => {
+                let dir = Path::new(&model_path).join("qwen3-asr-1.7b");
+                if is_qwen3_asr_installed_at(&dir) {
+                    return Ok("Model already installed".into());
+                }
+                manager
+                    .download_qwen3_asr_1_7b(&|progress| {
                         let _ = app_handle_clone.emit("model-download-progress", progress.clone());
                     })
                     .map_err(|e| e.to_string())?;

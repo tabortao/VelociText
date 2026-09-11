@@ -112,7 +112,7 @@ pub fn is_model_installed_at(dir: &Path) -> bool {
     find_model_file(dir).is_some() && dir.join("tokens.txt").exists()
 }
 
-/// Check if Qwen3-ASR model is installed at the given directory.
+/// Check if Qwen3-ASR model (0.6B or 1.7B, same file layout) is installed at the given directory.
 pub fn is_qwen3_asr_installed_at(dir: &Path) -> bool {
     let has_conv_frontend = dir.join("conv_frontend.onnx").exists();
     let has_encoder = dir.join("encoder.int8.onnx").exists() || dir.join("encoder.onnx").exists();
@@ -141,6 +141,9 @@ impl ModelManager {
 
         let qwen3_asr_path = Path::new(&self.models_dir).join("qwen3-asr");
         let qwen3_asr_installed = is_qwen3_asr_installed_at(&qwen3_asr_path);
+
+        let qwen3_asr_17b_path = Path::new(&self.models_dir).join("qwen3-asr-1.7b");
+        let qwen3_asr_17b_installed = is_qwen3_asr_installed_at(&qwen3_asr_17b_path);
 
         let silero_vad_path = Path::new(&self.models_dir).join("silero-vad");
         let silero_vad_installed = is_silero_vad_installed_at(&silero_vad_path);
@@ -175,6 +178,17 @@ impl ModelManager {
                 installed: qwen3_asr_installed,
                 path: if qwen3_asr_installed {
                     Some(qwen3_asr_path.to_string_lossy().to_string())
+                } else {
+                    None
+                },
+            },
+            ModelInfo {
+                name: "qwen3-asr-1.7b".into(),
+                display_name: "Qwen3-ASR (1.7B)".into(),
+                size: "~1.9GB (int8)".into(),
+                installed: qwen3_asr_17b_installed,
+                path: if qwen3_asr_17b_installed {
+                    Some(qwen3_asr_17b_path.to_string_lossy().to_string())
                 } else {
                     None
                 },
@@ -500,13 +514,48 @@ impl ModelManager {
     /// - `decoder.int8.onnx` — decoder model
     /// - `tokenizer/` — tokenizer directory
     pub fn download_qwen3_asr(&self, on_progress: &dyn Fn(DownloadProgress)) -> AppResult<String> {
-        let model_dir = Path::new(&self.models_dir).join("qwen3-asr");
+        self.download_qwen3_asr_variant(
+            "qwen3-asr",
+            "https://gitcode.com/tabortao/VelociText/releases/download/model/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.zip",
+            on_progress,
+        )
+    }
+
+    /// Download Qwen3-ASR 1.7B int8 model.
+    ///
+    /// Downloads from gitcode.com and extracts `conv_frontend.onnx`, `encoder.int8.onnx`,
+    /// `decoder.int8.onnx`, and the `tokenizer/` directory to `qwen3-asr-1.7b/`.
+    ///
+    /// Users can also manually place model files in the `qwen3-asr-1.7b/` directory
+    /// (same file layout as the 0.6B model).
+    pub fn download_qwen3_asr_1_7b(
+        &self,
+        on_progress: &dyn Fn(DownloadProgress),
+    ) -> AppResult<String> {
+        self.download_qwen3_asr_variant(
+            "qwen3-asr-1.7b",
+            "https://gitcode.com/tabortao/VelociText/releases/download/model/sherpa-onnx-qwen3-asr-1.7B-int8.zip",
+            on_progress,
+        )
+    }
+
+    /// Shared implementation: download and extract a Qwen3-ASR variant (0.6B / 1.7B).
+    ///
+    /// Both variants share the same file layout: `conv_frontend.onnx`,
+    /// `encoder.int8.onnx`, `decoder.int8.onnx`, and `tokenizer/`.
+    fn download_qwen3_asr_variant(
+        &self,
+        model_name: &str,
+        archive_url: &str,
+        on_progress: &dyn Fn(DownloadProgress),
+    ) -> AppResult<String> {
+        let model_dir = Path::new(&self.models_dir).join(model_name);
         std::fs::create_dir_all(&model_dir)?;
 
         // Check if already installed
         if is_qwen3_asr_installed_at(&model_dir) {
             on_progress(DownloadProgress {
-                model_name: "qwen3-asr".into(),
+                model_name: model_name.into(),
                 downloaded: 100,
                 total: 100,
                 percentage: 100.0,
@@ -515,24 +564,21 @@ impl ModelManager {
             return Ok(model_dir.to_string_lossy().to_string());
         }
 
-        // Download zip from gitcode.com
-        let archive_url = "https://gitcode.com/tabortao/VelociText/releases/download/model/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.zip";
-
         on_progress(DownloadProgress {
-            model_name: "qwen3-asr".into(),
+            model_name: model_name.into(),
             downloaded: 0,
             total: 0,
             percentage: 0.0,
-            stage: "Downloading Qwen3-ASR model archive...".into(),
+            stage: format!("Downloading {} model archive...", model_name),
         });
 
         let temp_dir = std::env::temp_dir();
-        let archive_path = temp_dir.join("qwen3-asr.zip");
+        let archive_path = temp_dir.join(format!("{}.zip", model_name));
 
-        download_file(archive_url, &archive_path, "qwen3-asr", on_progress)?;
+        download_file(archive_url, &archive_path, model_name, on_progress)?;
 
         on_progress(DownloadProgress {
-            model_name: "qwen3-asr".into(),
+            model_name: model_name.into(),
             downloaded: 100,
             total: 100,
             percentage: 90.0,
@@ -615,7 +661,7 @@ impl ModelManager {
         }
 
         on_progress(DownloadProgress {
-            model_name: "qwen3-asr".into(),
+            model_name: model_name.into(),
             downloaded: 100,
             total: 100,
             percentage: 100.0,

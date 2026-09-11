@@ -15,7 +15,7 @@ pub struct AppConfig {
     pub use_vad: bool,
     /// FFmpeg 路径 (可选)
     pub ffmpeg_path: Option<String>,
-    /// 活跃 ASR 模型: "sense-voice-small" | "paraformer"
+    /// 活跃 ASR 模型: "sense-voice-small" | "paraformer" | "qwen3-asr" | "qwen3-asr-1.7b"
     #[serde(default = "default_active_model")]
     pub active_model: String,
     /// 侧边栏是否收起

@@ -10,7 +10,10 @@ import { listen } from "@tauri-apps/api/event"
 import { useAppContext } from "@/lib/app-context"
 import type { AppConfig, ModelInfo, DownloadProgress } from "@/types"
 
-const ASR_MODELS = ["sense-voice-small", "paraformer", "qwen3-asr"] as const
+const ASR_MODELS = ["sense-voice-small", "paraformer", "qwen3-asr", "qwen3-asr-1.7b"] as const
+
+/** Manual model download page (gitcode.com release) */
+const MODEL_RELEASE_URL = "https://gitcode.com/tabortao/VelociText/releases/model"
 
 export function ModelSettingsPage() {
   const { t } = useAppContext()
@@ -252,6 +255,28 @@ export function ModelSettingsPage() {
               {t("models.downloadHint")}
             </div>
           )}
+
+          {/* Manual download hint */}
+          <div className="pt-3 border-t space-y-1">
+            <p className="text-xs text-muted-foreground">
+              {t("models.manualDownloadHint")}
+            </p>
+            <p className="text-xs">
+              <a
+                href={MODEL_RELEASE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary underline underline-offset-2 break-all"
+              >
+                {MODEL_RELEASE_URL}
+              </a>
+            </p>
+            {config?.modelPath && (
+              <p className="text-xs text-muted-foreground break-all">
+                {config.modelPath}
+              </p>
+            )}
+          </div>
         </CardContent>
       </Card>
     </div>

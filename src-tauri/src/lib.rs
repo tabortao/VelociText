@@ -41,7 +41,7 @@ pub struct AppState {
     pub vad_settings: Arc<Mutex<VadSettings>>,
     pub elapsed_secs: Arc<Mutex<f32>>,
     pub audio_duration_secs: Arc<Mutex<f32>>,
-    pub active_model: Arc<Mutex<String>>, // "sense-voice-small" | "paraformer" | "qwen3-asr"
+    pub active_model: Arc<Mutex<String>>, // "sense-voice-small" | "paraformer" | "qwen3-asr" | "qwen3-asr-1.7b"
     pub dictionary_config: Arc<Mutex<DictionaryConfig>>,
     pub hotwords_file_path: Arc<Mutex<Option<String>>>,
     /// Token used to cancel a pending deferred model release.
@@ -76,11 +76,9 @@ fn build_models(
     // Determine model type: use preferred if available, otherwise auto-detect
     let model_type = if let Some(preferred) = preferred_model {
         if available.contains(&preferred.to_string()) {
-            match preferred {
-                "sense-voice-small" => engine::recognizer_factory::ModelType::SenseVoice,
-                "paraformer" => engine::recognizer_factory::ModelType::Paraformer,
-                "qwen3-asr" => engine::recognizer_factory::ModelType::Qwen3Asr,
-                _ => {
+            match engine::recognizer_factory::ModelType::from_dir_name(preferred) {
+                Some(mt) => mt,
+                None => {
                     log::warn!(
                         "[build_models] unknown preferred model: {preferred}, auto-detecting"
                     );
@@ -97,6 +95,8 @@ fn build_models(
         engine::recognizer_factory::ModelType::Paraformer
     } else if available.contains(&"qwen3-asr".to_string()) {
         engine::recognizer_factory::ModelType::Qwen3Asr
+    } else if available.contains(&"qwen3-asr-1.7b".to_string()) {
+        engine::recognizer_factory::ModelType::Qwen3Asr1_7b
     } else {
         return Err(format!(
             "No model found in {model_path}. Available: {available:?}"
@@ -173,84 +173,17 @@ fn build_models(
         match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             engine::recognizer_factory::RecognizerFactory::create(&model_type, &config)
         })) {
-            Ok(Ok(r)) => {
-                let name = if config.model_dir.contains("paraformer") {
-                    "paraformer"
-                } else if config.model_dir.contains("qwen3-asr") {
-                    "qwen3-asr"
-                } else {
-                    "sense-voice-small"
-                };
-                (r, name.to_string())
-            }
+            Ok(Ok(r)) => (r, model_type.dir_name().to_string()),
             Ok(Err(e)) => {
                 log::error!(
                     "[build_models] failed to create {} recognizer: {e}",
                     model_type.display_name()
                 );
-                // Try to fall back to another available model
-                let fallback_type = match model_type {
-                    engine::recognizer_factory::ModelType::Paraformer => {
-                        if available.contains(&"sense-voice-small".to_string()) {
-                            log::warn!("[build_models] falling back to SenseVoice-Small");
-                            Some(engine::recognizer_factory::ModelType::SenseVoice)
-                        } else if available.contains(&"qwen3-asr".to_string()) {
-                            log::warn!("[build_models] falling back to Qwen3-ASR");
-                            Some(engine::recognizer_factory::ModelType::Qwen3Asr)
-                        } else {
-                            None
-                        }
-                    }
-                    engine::recognizer_factory::ModelType::Qwen3Asr => {
-                        if available.contains(&"sense-voice-small".to_string()) {
-                            log::warn!("[build_models] falling back to SenseVoice-Small");
-                            Some(engine::recognizer_factory::ModelType::SenseVoice)
-                        } else if available.contains(&"paraformer".to_string()) {
-                            log::warn!("[build_models] falling back to Paraformer");
-                            Some(engine::recognizer_factory::ModelType::Paraformer)
-                        } else {
-                            None
-                        }
-                    }
-                    engine::recognizer_factory::ModelType::SenseVoice
-                        if available.contains(&"paraformer".to_string()) =>
-                    {
-                        log::warn!("[build_models] falling back to Paraformer");
-                        Some(engine::recognizer_factory::ModelType::Paraformer)
-                    }
-                    engine::recognizer_factory::ModelType::SenseVoice
-                        if available.contains(&"qwen3-asr".to_string()) =>
-                    {
-                        log::warn!("[build_models] falling back to Qwen3-ASR");
-                        Some(engine::recognizer_factory::ModelType::Qwen3Asr)
-                    }
-                    _ => None,
-                };
-                match fallback_type {
-                    Some(ft) => {
-                        let fb_dir = Path::new(model_path).join(ft.dir_name());
-                        // Don't pass hotwords to fallback — avoid cascading failure
-                        let fb_config = engine::recognizer_factory::RecognizerConfig {
-                            model_dir: fb_dir.to_string_lossy().to_string(),
-                            num_threads: settings.num_threads as u32,
-                            hotwords_file: None,
-                            hotwords_score: 1.5,
-                            use_itn: true,
-                        };
-                        let fb_name = ft.dir_name().to_string();
-                        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            engine::recognizer_factory::RecognizerFactory::create(&ft, &fb_config)
-                        })) {
-                            Ok(Ok(r)) => (r, fb_name),
-                            Ok(Err(fe)) => return Err(format!("Fallback also failed: {fe}")),
-                            Err(_) => {
-                                return Err("Fallback model panicked during creation".to_string())
-                            }
-                        }
-                    }
-                    None => {
+                match create_fallback_recognizer(model_path, settings, &model_type, &available) {
+                    Ok(res) => res,
+                    Err(fe) => {
                         return Err(format!(
-                            "Failed to create {} recognizer: {e}",
+                            "Failed to create {} recognizer: {e} ({fe})",
                             model_type.display_name()
                         ))
                     }
@@ -262,69 +195,17 @@ fn build_models(
                     model_type.display_name(),
                     panic_info
                 );
-                // Try to fall back to another available model
-                let fallback_type = match model_type {
-                    engine::recognizer_factory::ModelType::Paraformer => {
-                        if available.contains(&"sense-voice-small".to_string()) {
-                            Some(engine::recognizer_factory::ModelType::SenseVoice)
-                        } else if available.contains(&"qwen3-asr".to_string()) {
-                            Some(engine::recognizer_factory::ModelType::Qwen3Asr)
-                        } else {
-                            None
-                        }
+                match create_fallback_recognizer(model_path, settings, &model_type, &available) {
+                    Ok(res) => {
+                        log::warn!(
+                            "[build_models] recovered from panic, using fallback model {}",
+                            res.1
+                        );
+                        res
                     }
-                    engine::recognizer_factory::ModelType::Qwen3Asr => {
-                        if available.contains(&"sense-voice-small".to_string()) {
-                            Some(engine::recognizer_factory::ModelType::SenseVoice)
-                        } else if available.contains(&"paraformer".to_string()) {
-                            Some(engine::recognizer_factory::ModelType::Paraformer)
-                        } else {
-                            None
-                        }
-                    }
-                    engine::recognizer_factory::ModelType::SenseVoice
-                        if available.contains(&"paraformer".to_string()) =>
-                    {
-                        Some(engine::recognizer_factory::ModelType::Paraformer)
-                    }
-                    engine::recognizer_factory::ModelType::SenseVoice
-                        if available.contains(&"qwen3-asr".to_string()) =>
-                    {
-                        Some(engine::recognizer_factory::ModelType::Qwen3Asr)
-                    }
-                    _ => None,
-                };
-                match fallback_type {
-                    Some(ft) => {
-                        let fb_dir = Path::new(model_path).join(ft.dir_name());
-                        // Don't pass hotwords to fallback — avoid cascading failure
-                        let fb_config = engine::recognizer_factory::RecognizerConfig {
-                            model_dir: fb_dir.to_string_lossy().to_string(),
-                            num_threads: settings.num_threads as u32,
-                            hotwords_file: None,
-                            hotwords_score: 1.5,
-                            use_itn: true,
-                        };
-                        let fb_name = ft.dir_name().to_string();
-                        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            engine::recognizer_factory::RecognizerFactory::create(&ft, &fb_config)
-                        })) {
-                            Ok(Ok(r)) => {
-                                log::warn!(
-                                    "[build_models] recovered from panic, using fallback model {}",
-                                    fb_name
-                                );
-                                (r, fb_name)
-                            }
-                            Ok(Err(fe)) => {
-                                return Err(format!("Fallback after panic also failed: {fe}"))
-                            }
-                            Err(_) => return Err("Fallback model also panicked".into()),
-                        }
-                    }
-                    None => {
+                    Err(fe) => {
                         return Err(format!(
-                            "{} model creation panicked and no fallback available",
+                            "{} model creation panicked and no fallback available ({fe})",
                             model_type.display_name()
                         ))
                     }
@@ -352,6 +233,62 @@ fn build_models(
         effective_settings.num_threads as u32,
         actual_dir_name.to_string(),
     ))
+}
+
+/// Pick a fallback ASR model when the preferred one fails to load.
+/// Priority: SenseVoice (most reliable) → Paraformer → Qwen3-ASR (1.7B) → Qwen3-ASR (0.6B).
+fn pick_fallback_model(
+    failed: &engine::recognizer_factory::ModelType,
+    available: &[String],
+) -> Option<engine::recognizer_factory::ModelType> {
+    const FALLBACK_PRIORITY: [&str; 4] = [
+        "sense-voice-small",
+        "paraformer",
+        "qwen3-asr-1.7b",
+        "qwen3-asr",
+    ];
+    FALLBACK_PRIORITY
+        .iter()
+        .filter(|name| **name != failed.dir_name())
+        .find(|name| available.contains(&name.to_string()))
+        .and_then(|name| engine::recognizer_factory::ModelType::from_dir_name(name))
+}
+
+/// Create a recognizer from the best available fallback model after `failed_type`
+/// failed to load (returned Err or panicked).
+fn create_fallback_recognizer(
+    model_path: &str,
+    settings: &VadSettings,
+    failed_type: &engine::recognizer_factory::ModelType,
+    available: &[String],
+) -> Result<(OfflineRecognizer, String), String> {
+    let Some(fallback_type) = pick_fallback_model(failed_type, available) else {
+        return Err("no fallback model available".to_string());
+    };
+    log::warn!(
+        "[build_models] falling back to {}",
+        fallback_type.display_name()
+    );
+
+    let fb_dir = Path::new(model_path).join(fallback_type.dir_name());
+    // Don't pass hotwords to fallback — avoid cascading failure
+    let fb_config = engine::recognizer_factory::RecognizerConfig {
+        model_dir: fb_dir.to_string_lossy().to_string(),
+        num_threads: settings.num_threads as u32,
+        hotwords_file: None,
+        hotwords_score: 1.5,
+        use_itn: true,
+    };
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        engine::recognizer_factory::RecognizerFactory::create(&fallback_type, &fb_config)
+    })) {
+        Ok(Ok(r)) => Ok((r, fallback_type.dir_name().to_string())),
+        Ok(Err(fe)) => Err(format!("fallback {} also failed: {fe}", fallback_type.display_name())),
+        Err(_) => Err(format!(
+            "fallback {} panicked during creation",
+            fallback_type.display_name()
+        )),
+    }
 }
 
 /// Create Silero VAD with custom settings.
@@ -423,16 +360,17 @@ pub fn run() {
             );
             // Try fallback models in priority order (SenseVoice is most reliable)
             let fallbacks = match crashed_model.as_str() {
-                "paraformer" => vec!["sense-voice-small", "qwen3-asr"],
-                "qwen3-asr" => vec!["sense-voice-small", "paraformer"],
-                _ => vec!["sense-voice-small", "paraformer", "qwen3-asr"],
+                "paraformer" => vec!["sense-voice-small", "qwen3-asr", "qwen3-asr-1.7b"],
+                "qwen3-asr" => vec!["sense-voice-small", "paraformer", "qwen3-asr-1.7b"],
+                "qwen3-asr-1.7b" => vec!["sense-voice-small", "paraformer", "qwen3-asr"],
+                _ => vec!["sense-voice-small", "paraformer", "qwen3-asr", "qwen3-asr-1.7b"],
             };
             let mut switched = false;
             for fallback in &fallbacks {
                 let fallback_dir = std::path::Path::new(&initial_config.model_path).join(fallback);
                 let available = if *fallback == "paraformer" {
                     engine::model_manager::is_paraformer_installed_at(&fallback_dir)
-                } else if *fallback == "qwen3-asr" {
+                } else if *fallback == "qwen3-asr" || *fallback == "qwen3-asr-1.7b" {
                     engine::model_manager::is_qwen3_asr_installed_at(&fallback_dir)
                 } else {
                     engine::model_manager::is_model_installed_at(&fallback_dir)

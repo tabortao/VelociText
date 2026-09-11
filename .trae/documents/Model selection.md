@@ -14,6 +14,7 @@ Qwen3-ASR 是由阿里云 Qwen 团队开发的一系列开源 ASR 模型，支�
 - 使用模型 sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25，详情https://k2-fsa.github.io/sherpa/onnx/qwen3-asr/pretrained.html#sherpa-onnx-qwen3-asr-0-6b-int8-2026-03-25
 - 模型下载：https://gitcode.com/tabortao/VelociText/releases/download/model/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.zip  推荐下载地址，用户可以直接下载并解压到 `qwen3-asr/` 目录下
 - qwen3-asr-0.6B-int8模型较大，对电脑配置要求比较高，建议在性能较好的电脑上运行。
+- 模型下载qwen3-asr-1.7B：https://gitcode.com/tabortao/VelociText/releases/download/model/sherpa-onnx-qwen3-asr-1.7B-int8.zip  
 
 ## SenseVoice-Small
 
