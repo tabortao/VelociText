@@ -82,6 +82,7 @@ mod transcribe_integration {
             &cancelled,
             &progress,
             &segments,
+            None,
         )
         .expect("Streaming recognition failed");
 
@@ -163,8 +164,16 @@ mod transcribe_integration {
         let progress = Arc::new(AtomicU32::new(0));
         let segments = Arc::new(Mutex::new(Vec::new()));
 
-        let duration = run_recognition(path, &recognizer, &vad, &cancelled, &progress, &segments)
-            .expect("Recognition failed");
+        let duration = run_recognition(
+            path,
+            &recognizer,
+            &vad,
+            &cancelled,
+            &progress,
+            &segments,
+            None,
+        )
+        .expect("Recognition failed");
 
         let results = segments.lock().unwrap().clone();
         println!("  {} segments over {duration:.1}s:", results.len());

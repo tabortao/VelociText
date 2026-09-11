@@ -9,10 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 新增
 - **Qwen3-ASR (1.7B) 模型支持**：模型管理页面的 ASR 模型下拉框新增"Qwen3-ASR (1.7B)"选项，支持一键下载（约 1.9GB，int8 量化，[下载地址](https://gitcode.com/tabortao/VelociText/releases/download/model/sherpa-onnx-qwen3-asr-1.7B-int8.zip)）、切换并重启使用。模型文件布局与 0.6B 相同（`conv_frontend.onnx` + `encoder.int8.onnx` + `decoder.int8.onnx` + `tokenizer/`），需放置在模型目录下的 `qwen3-asr-1.7b` 子文件夹；手动放置后应用即可识别。模型加载失败时的自动回退链与崩溃恢复回退链均已纳入该模型（回退优先级：SenseVoice → Paraformer → Qwen3-ASR 1.7B → Qwen3-ASR 0.6B）。
-- **模型管理页手动下载指引**：模型管理卡片底部新增说明区，包含[模型发布页超链接](https://gitcode.com/tabortao/VelociText/releases/model)（点击后经系统浏览器打开）、各模型对应的子文件夹名（sense-voice-small / paraformer / qwen3-asr / qwen3-asr-1.7b / silero-vad）及当前模型目录路径，方便下载缓慢或失败时手动下载 zip 解压安装。中英文界面均已适配。
+- **转录语言指定**："转录"与"转字幕"页面新增语言选择器，可选自动检测（默认）、中文、英语、粤语、日语、韩语。指定语言后会将语言选项传给 Qwen3-ASR 模型，避免英文音频转录时输出 "language English" 前缀或夹杂汉字的问题（SenseVoice / Paraformer 模型忽略该选项）；两个页面的选择分别保存在本地，转录进行中不可切换。中英文界面均已适配。
+- **模型管理页手动下载指引**：模型管理卡片标题旁新增帮助图标，点击后经系统浏览器打开[模型下载与安装帮助页](https://gitcode.com/tabortao/VelociText/discussions/1)；卡片底部说明区列出各模型对应的子文件夹名（sense-voice-small / paraformer / qwen3-asr / qwen3-asr-1.7b / silero-vad）及当前模型目录路径，方便下载缓慢或失败时手动下载 zip 解压安装。中英文界面均已适配。
 
 ### 优化
-- **字幕文件按句分段**：导出的 SRT / VTT 字幕文件现在每句话独占一个字幕时间段（此前一个 VAD 语音分段内的多句话共用同一时间段）。导出时按句末标点（。！？；…!?; 及英文句点，英文句点仅在后接空格或结尾时生效以避免拆开小数）将分段文本拆分为单句，时间段按字符权重（全角 1.0 / 半角 0.5）比例分配，相邻句子时间段首尾相接且完整覆盖原分段。TXT 导出格式保持不变。
 - **模型加载回退逻辑重构**：`build_models` 中两处重复的回退模型匹配代码（创建失败与创建 panic 两条路径）合并为 `pick_fallback_model` / `create_fallback_recognizer` 辅助函数，原先基于路径字符串包含判断实际模型的写法改为直接使用 `ModelType::dir_name()`，消除重复并降低新增模型时的维护成本。
 
 ## [v0.1.8] - 2026-09-10

@@ -261,8 +261,15 @@ pub fn release_asr_models(state: State<'_, AppState>) -> Result<(), String> {
 
 /// Start recognition in a background thread. Returns immediately.
 /// Frontend should poll `get_recognition_progress` to track progress.
+///
+/// `language` is an optional UI language code ("en", "zh", ...) used to pin
+/// the recognition language (effective for Qwen3-ASR models; ignored by others).
 #[tauri::command]
-pub fn recognize_file(path: String, state: State<'_, AppState>) -> Result<(), String> {
+pub fn recognize_file(
+    path: String,
+    language: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     if state.running.swap(true, Ordering::SeqCst) {
         return Err("Recognition is already running".to_string());
     }
@@ -310,7 +317,15 @@ pub fn recognize_file(path: String, state: State<'_, AppState>) -> Result<(), St
 
     std::thread::spawn(move || {
         let start_time = Instant::now();
-        let result = run_recognition(&path, &recognizer, &vad, &cancelled, &progress, &segments);
+        let result = run_recognition(
+            &path,
+            &recognizer,
+            &vad,
+            &cancelled,
+            &progress,
+            &segments,
+            language.as_deref(),
+        );
         let elapsed = start_time.elapsed().as_secs_f32();
 
         if let Ok(mut e) = elapsed_secs.lock() {

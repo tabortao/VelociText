@@ -27,6 +27,19 @@ const MEDIA_EXTS = [
 
 const VIDEO_EXTS = ["mp4", "avi", "mov", "mkv", "flv", "webm"]
 
+/** Language options for recognition (codes match the backend mapping).
+ * "auto" lets the model detect the language. */
+const LANGUAGES = [
+  { code: "auto", nameKey: "transcribe.languageAuto" },
+  { code: "zh", name: "中文" },
+  { code: "en", name: "English" },
+  { code: "yue", name: "粤语" },
+  { code: "ja", name: "日本語" },
+  { code: "ko", name: "한국어" },
+] as const
+
+const LANGUAGE_STORAGE_KEY = "subtitleLanguage"
+
 type ItemStatus = "pending" | "processing" | "writing" | "done" | "failed" | "cancelled"
 
 interface SubtitleItem {
@@ -66,6 +79,10 @@ export function SubtitlePage() {
   const [isDragOver, setIsDragOver] = useState(false)
   const [flashMessage, setFlashMessage] = useState("")
   const [currentIdx, setCurrentIdx] = useState(-1)
+  const [language, setLanguage] = useState<string>(() => {
+    const saved = localStorage.getItem(LANGUAGE_STORAGE_KEY)
+    return saved && LANGUAGES.some((l) => l.code === saved) ? saved : "auto"
+  })
 
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const initPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -217,6 +234,11 @@ export function SubtitlePage() {
     showFlash("")
   }
 
+  const handleLanguageChange = (code: string) => {
+    setLanguage(code)
+    localStorage.setItem(LANGUAGE_STORAGE_KEY, code)
+  }
+
   const updateItem = (idx: number, patch: Partial<SubtitleItem>) => {
     setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)))
   }
@@ -275,6 +297,8 @@ export function SubtitlePage() {
     const batchStart = Date.now()
     let succeeded = 0
     let failed = 0
+    // Pin the recognition language for the whole batch (null = auto-detect)
+    const batchLanguage = language === "auto" ? null : language
 
     for (let i = 0; i < list.length; i++) {
       if (stopRef.current) break
@@ -284,7 +308,7 @@ export function SubtitlePage() {
       updateItem(i, { status: "processing", progress: 0 })
 
       try {
-        await invoke("recognize_file", { path: item.path })
+        await invoke("recognize_file", { path: item.path, language: batchLanguage })
         const state = await pollRecognition(i)
 
         // Write SRT next to the source file
@@ -518,6 +542,19 @@ export function SubtitlePage() {
                             <CaptionsIcon className="size-3.5 mr-1" />
                             {t("subtitle.start")}
                           </Button>
+                          <select
+                            value={language}
+                            onChange={(e) => handleLanguageChange(e.target.value)}
+                            title={t("transcribe.language")}
+                            aria-label={t("transcribe.language")}
+                            className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+                          >
+                            {LANGUAGES.map((l) => (
+                              <option key={l.code} value={l.code}>
+                                {"nameKey" in l ? t(l.nameKey) : l.name}
+                              </option>
+                            ))}
+                          </select>
                           <Button variant="outline" size="sm" onClick={() => openFileDialog()}>
                             <PlusIcon className="size-3.5 mr-1" />
                             {t("subtitle.addMore")}

@@ -79,6 +79,8 @@ const dict = {
     "transcribe.done": "完成",
     "transcribe.segmentsWithCount": "{count} 个分段",
     "transcribe.completedToast": "转录完成 · 音频 {duration}s · 耗时 {elapsed}s",
+    "transcribe.language": "转录语言",
+    "transcribe.languageAuto": "自动检测",
 
     // Subtitle page
     "subtitle.title": "转字幕",
@@ -180,6 +182,7 @@ const dict = {
     "models.switchModel": "切换并重启",
     "models.switching": "重启中...",
     "models.manualDownloadHint": "下载缓慢或失败时，可前往模型发布页手动下载模型 zip 压缩包，解压到模型目录下对应的子文件夹中（sense-voice-small / paraformer / qwen3-asr / qwen3-asr-1.7b / silero-vad）：",
+    "models.help": "模型下载与安装帮助",
     "models.manualDownloadLink": "模型下载页面",
 
     // About page
@@ -300,6 +303,8 @@ const dict = {
     "transcribe.done": "Done",
     "transcribe.segmentsWithCount": "{count} segment(s)",
     "transcribe.completedToast": "Transcription complete · Audio {duration}s · Elapsed {elapsed}s",
+    "transcribe.language": "Language",
+    "transcribe.languageAuto": "Auto detect",
 
     // Subtitle page
     "subtitle.title": "Subtitles",
@@ -401,6 +406,7 @@ const dict = {
     "models.switchModel": "Switch & Restart",
     "models.switching": "Restarting...",
     "models.manualDownloadHint": "If the download is slow or fails, visit the model release page to manually download the model zip and extract it into the matching subfolder of the model directory (sense-voice-small / paraformer / qwen3-asr / qwen3-asr-1.7b / silero-vad):",
+    "models.help": "Model download & installation help",
     "models.manualDownloadLink": "Model download page",
 
     // About page

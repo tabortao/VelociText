@@ -27,6 +27,19 @@ import type { StreamingSegment, ProcessingState, InitStatus, VadSettings } from 
 
 type TranscribeState = "idle" | "loading" | "processing" | "completed" | "cancelled" | "error"
 
+/** Language options for recognition (codes match the backend mapping).
+ * "auto" lets the model detect the language. */
+const LANGUAGES = [
+  { code: "auto", nameKey: "transcribe.languageAuto" },
+  { code: "zh", name: "中文" },
+  { code: "en", name: "English" },
+  { code: "yue", name: "粤语" },
+  { code: "ja", name: "日本語" },
+  { code: "ko", name: "한국어" },
+] as const
+
+const LANGUAGE_STORAGE_KEY = "transcribeLanguage"
+
 function formatSrtTime(seconds: number): string {
   const totalMs = (seconds * 1000) as number
   const h = Math.floor(totalMs / 3_600_000)
@@ -72,7 +85,16 @@ export function TranscribePage() {
   const [showSettings, setShowSettings] = useState(false)
   const [playerUrl, setPlayerUrl] = useState("")
   const [flashMessage, setFlashMessage] = useState("")
+  const [language, setLanguage] = useState<string>(() => {
+    const saved = localStorage.getItem(LANGUAGE_STORAGE_KEY)
+    return saved && LANGUAGES.some((l) => l.code === saved) ? saved : "auto"
+  })
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Keep language readable from stale closures (drop listener)
+  const languageRef = useRef(language)
+  useEffect(() => {
+    languageRef.current = language
+  }, [language])
 
   // VAD settings form state
   const [vadThreshold, setVadThreshold] = useState("0.2")
@@ -240,6 +262,11 @@ export function TranscribePage() {
   }
 
   // ── Streaming recognition ──────────────────────────────────────────────
+  const handleLanguageChange = (code: string) => {
+    setLanguage(code)
+    localStorage.setItem(LANGUAGE_STORAGE_KEY, code)
+  }
+
   const startRecognition = async (path: string) => {
     if (!modelsReady) return
 
@@ -262,7 +289,10 @@ export function TranscribePage() {
     if (pollTimerRef.current) clearInterval(pollTimerRef.current)
 
     try {
-      await invoke("recognize_file", { path })
+      await invoke("recognize_file", {
+        path,
+        language: languageRef.current === "auto" ? null : languageRef.current,
+      })
       // Start polling for results
       startProgressPolling()
     } catch (err) {
@@ -643,19 +673,35 @@ export function TranscribePage() {
               </CardTitle>
               <CardDescription>{t("transcribe.desc")}</CardDescription>
             </div>
-            {/* Settings gear button */}
-            <Button
-              variant="ghost"
-              size="icon"
-              disabled={!modelsReady || transcribeState === "processing"}
-              title={t("transcribe.vadSettings")}
-              onClick={() => {
-                loadVadSettings()
-                setShowSettings(true)
-              }}
-            >
-              <SettingsIcon className="size-5" />
-            </Button>
+            {/* Language selector + settings gear button */}
+            <div className="flex items-center gap-2">
+              <select
+                value={language}
+                onChange={(e) => handleLanguageChange(e.target.value)}
+                disabled={transcribeState === "processing"}
+                title={t("transcribe.language")}
+                aria-label={t("transcribe.language")}
+                className="h-9 rounded-md border border-input bg-background px-2 text-sm disabled:opacity-50"
+              >
+                {LANGUAGES.map((l) => (
+                  <option key={l.code} value={l.code}>
+                    {"nameKey" in l ? t(l.nameKey) : l.name}
+                  </option>
+                ))}
+              </select>
+              <Button
+                variant="ghost"
+                size="icon"
+                disabled={!modelsReady || transcribeState === "processing"}
+                title={t("transcribe.vadSettings")}
+                onClick={() => {
+                  loadVadSettings()
+                  setShowSettings(true)
+                }}
+              >
+                <SettingsIcon className="size-5" />
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent>

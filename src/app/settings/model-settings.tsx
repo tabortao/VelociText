@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Badge } from "@/components/ui/badge"
-import { CpuIcon, DownloadIcon, FolderOpenIcon, ZapIcon } from "lucide-react"
+import { CpuIcon, DownloadIcon, FolderOpenIcon, HelpCircleIcon, ZapIcon } from "lucide-react"
 import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
 import { useAppContext } from "@/lib/app-context"
@@ -12,8 +12,8 @@ import type { AppConfig, ModelInfo, DownloadProgress } from "@/types"
 
 const ASR_MODELS = ["sense-voice-small", "paraformer", "qwen3-asr", "qwen3-asr-1.7b"] as const
 
-/** Manual model download page (gitcode.com release) */
-const MODEL_RELEASE_URL = "https://gitcode.com/tabortao/VelociText/releases/model"
+/** Model download & installation help (gitcode.com discussion) */
+const MODEL_HELP_URL = "https://gitcode.com/tabortao/VelociText/discussions/1"
 
 export function ModelSettingsPage() {
   const { t } = useAppContext()
@@ -148,6 +148,15 @@ export function ModelSettingsPage() {
           <CardTitle className="flex items-center gap-2">
             <CpuIcon className="size-5" />
             {t("models.title.management")}
+            <a
+              href={MODEL_HELP_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={t("models.help")}
+              className="inline-flex items-center text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <HelpCircleIcon className="size-4" />
+            </a>
           </CardTitle>
           <CardDescription>{t("models.desc.management")}</CardDescription>
         </CardHeader>
@@ -260,16 +269,6 @@ export function ModelSettingsPage() {
           <div className="pt-3 border-t space-y-1">
             <p className="text-xs text-muted-foreground">
               {t("models.manualDownloadHint")}
-            </p>
-            <p className="text-xs">
-              <a
-                href={MODEL_RELEASE_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary underline underline-offset-2 break-all"
-              >
-                {MODEL_RELEASE_URL}
-              </a>
             </p>
             {config?.modelPath && (
               <p className="text-xs text-muted-foreground break-all">

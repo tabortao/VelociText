@@ -73,16 +73,52 @@ const GAP_BACKFILL_MIN_SECS: f32 = 3.0;
 /// max_total_len (~39s of audio).
 const GAP_BACKFILL_CHUNK_SECS: f32 = 12.0;
 
+/// Map a UI language code (e.g. "en") to the Qwen3-ASR prompt language name
+/// (e.g. "English"). Qwen3-ASR accepts full language names in its
+/// "language <name>" prompt instruction; sherpa-onnx exposes this through the
+/// per-stream "language" option (read only by the Qwen3-ASR recognizer).
+///
+/// Returns `None` for "auto" or unsupported codes — no language hint is set
+/// and the model auto-detects the language.
+fn qwen3_language_name(code: &str) -> Option<&'static str> {
+    match code {
+        "zh" => Some("Chinese"),
+        "en" => Some("English"),
+        "yue" => Some("Cantonese"),
+        "ja" => Some("Japanese"),
+        "ko" => Some("Korean"),
+        "de" => Some("German"),
+        "fr" => Some("French"),
+        "es" => Some("Spanish"),
+        "ru" => Some("Russian"),
+        "it" => Some("Italian"),
+        "pt" => Some("Portuguese"),
+        "th" => Some("Thai"),
+        "vi" => Some("Vietnamese"),
+        "id" => Some("Indonesian"),
+        "ms" => Some("Malay"),
+        "tr" => Some("Turkish"),
+        "ar" => Some("Arabic"),
+        "hi" => Some("Hindi"),
+        "nl" => Some("Dutch"),
+        _ => None,
+    }
+}
+
 /// Recognize a single VAD speech segment: skip if too short or punctuation-only.
 ///
 /// `sample_offset` compensates for VAD state resets: after `vad.reset()` the
 /// segment start indices restart from zero, so the absolute position is
 /// `sample_offset + segment.start()`.
+///
+/// `language` is the Qwen3-ASR prompt language name ("English", ...) or `None`
+/// to let the model auto-detect. Other models ignore the option.
 fn recognize_segment(
     recognizer: &OfflineRecognizer,
     segment: &sherpa_onnx::SpeechSegment,
     segments: &Arc<Mutex<Vec<SegmentResult>>>,
     sample_offset: usize,
+    language: Option<&str>,
 ) {
     let samples = segment.samples();
     let duration = samples.len() as f32 / 16000.0;
@@ -94,6 +130,9 @@ fn recognize_segment(
     let end_time = start_time + duration;
 
     let stream = recognizer.create_stream();
+    if let Some(lang) = language {
+        stream.set_option("language", lang);
+    }
     stream.accept_waveform(16000, samples);
     recognizer.decode(&stream);
 
@@ -128,6 +167,7 @@ fn backfill_gaps(
     audio_duration: f32,
     cancelled: &AtomicBool,
     segments: &Arc<Mutex<Vec<SegmentResult>>>,
+    language: Option<&str>,
 ) {
     // Collect gaps (start, end) longer than GAP_BACKFILL_MIN_SECS.
     let gaps: Vec<(f32, f32)> = {
@@ -177,6 +217,9 @@ fn backfill_gaps(
             let ce = cs + chunk.len() as f32 / 16000.0;
 
             let stream = recognizer.create_stream();
+            if let Some(lang) = language {
+                stream.set_option("language", lang);
+            }
             stream.accept_waveform(16000, chunk);
             recognizer.decode(&stream);
 
@@ -218,6 +261,8 @@ fn backfill_gaps(
 /// * `cancelled` - Set to `true` to abort recognition.
 /// * `progress` - Updated with percentage (0-99) during decoding.
 /// * `segments` - Results are pushed here as VAD detects + ASR transcribes each segment.
+/// * `language_code` - Optional UI language code ("en", "zh", ...) to pin the
+///   recognition language (effective for Qwen3-ASR models; ignored by others).
 pub fn run_recognition(
     path: &str,
     recognizer: &Arc<Mutex<Option<OfflineRecognizer>>>,
@@ -225,7 +270,14 @@ pub fn run_recognition(
     cancelled: &AtomicBool,
     progress: &Arc<AtomicU32>,
     segments: &Arc<Mutex<Vec<SegmentResult>>>,
+    language_code: Option<&str>,
 ) -> AppResult<f32> {
+    // Resolve the language code once; None = auto-detect.
+    let language = language_code.and_then(qwen3_language_name);
+    if language.is_some() {
+        log::info!("[run_recognition] language pinned: {}", language.unwrap());
+    }
+
     let (mut format_reader, mut decoder, track_id, num_channels_hint, native_rate_hint) =
         audio_decoder::open_audio_file(path)?;
 
@@ -362,7 +414,7 @@ pub fn run_recognition(
             samples_since_speech += window_size;
 
             while let Some(segment) = vad.front() {
-                recognize_segment(recognizer, &segment, segments, reset_offset);
+                recognize_segment(recognizer, &segment, segments, reset_offset, language);
                 vad.pop();
                 samples_since_speech = 0;
             }
@@ -402,7 +454,7 @@ pub fn run_recognition(
         }
         vad.flush();
         while let Some(segment) = vad.front() {
-            recognize_segment(recognizer, &segment, segments, reset_offset);
+            recognize_segment(recognizer, &segment, segments, reset_offset, language);
             vad.pop();
         }
     }
@@ -411,7 +463,7 @@ pub fn run_recognition(
 
     // Gap backfill: recover speech the VAD missed (singing/rap over music).
     if !cancelled.load(Ordering::Relaxed) && audio_duration > 0.0 {
-        backfill_gaps(path, recognizer, audio_duration, cancelled, segments);
+        backfill_gaps(path, recognizer, audio_duration, cancelled, segments, language);
     }
 
     let final_count = segments.lock().map(|s| s.len()).unwrap_or(0);
