@@ -399,11 +399,30 @@ export function SubtitlePage() {
     <div className="px-4 lg:px-6 space-y-4">
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2">
-            <CaptionsIcon className="size-5" />
-            {t("subtitle.title")}
-          </CardTitle>
-          <CardDescription>{t("subtitle.desc")}</CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <CaptionsIcon className="size-5" />
+                {t("subtitle.title")}
+              </CardTitle>
+              <CardDescription>{t("subtitle.desc")}</CardDescription>
+            </div>
+            {/* Language selector (same as transcribe page header) */}
+            <select
+              value={language}
+              onChange={(e) => handleLanguageChange(e.target.value)}
+              disabled={batchRunning}
+              title={t("transcribe.language")}
+              aria-label={t("transcribe.language")}
+              className="h-9 rounded-md border border-input bg-background px-2 text-sm disabled:opacity-50"
+            >
+              {LANGUAGES.map((l) => (
+                <option key={l.code} value={l.code}>
+                  {"nameKey" in l ? t(l.nameKey) : l.name}
+                </option>
+              ))}
+            </select>
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Flash message toast */}
@@ -542,19 +561,6 @@ export function SubtitlePage() {
                             <CaptionsIcon className="size-3.5 mr-1" />
                             {t("subtitle.start")}
                           </Button>
-                          <select
-                            value={language}
-                            onChange={(e) => handleLanguageChange(e.target.value)}
-                            title={t("transcribe.language")}
-                            aria-label={t("transcribe.language")}
-                            className="h-8 rounded-md border border-input bg-background px-2 text-sm"
-                          >
-                            {LANGUAGES.map((l) => (
-                              <option key={l.code} value={l.code}>
-                                {"nameKey" in l ? t(l.nameKey) : l.name}
-                              </option>
-                            ))}
-                          </select>
                           <Button variant="outline" size="sm" onClick={() => openFileDialog()}>
                             <PlusIcon className="size-3.5 mr-1" />
                             {t("subtitle.addMore")}

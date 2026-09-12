@@ -5,6 +5,14 @@ All notable changes to VelociText will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.1.10] - 2026-09-12
+
+### 新增
+- **VAD 设置参数说明**：转录页面 VAD 设置齿轮按钮右侧新增帮助图标，点击弹窗展示各参数的作用、取值范围、默认值及调整建议（阈值：调低更易检出轻微语音但误判增多；最小静音时长：调大避免语气停顿切碎句子；最小语音时长：过滤噪声脉冲；最大语音时长：单段上限需在模型处理能力内；线程数：影响检测速度）。中英文界面均已适配。
+
+### 优化
+- **转字幕页面语言选择器位置**：语言选择器从底部操作栏移至页面标题右侧，与转录页面布局保持一致，批量转录进行中禁用切换。
+
 ## [v0.1.9] - 2026-09-11
 
 ### 新增

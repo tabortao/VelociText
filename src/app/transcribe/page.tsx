@@ -17,6 +17,7 @@ import {
   XIcon,
   SettingsIcon,
   SaveIcon,
+  InfoIcon,
 } from "lucide-react"
 import { convertFileSrc, invoke } from "@tauri-apps/api/core"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
@@ -83,6 +84,7 @@ export function TranscribePage() {
   const [activeRowIdx, setActiveRowIdx] = useState(-1)
   const [activeSubtitle, setActiveSubtitle] = useState("")
   const [showSettings, setShowSettings] = useState(false)
+  const [showVadHelp, setShowVadHelp] = useState(false)
   const [playerUrl, setPlayerUrl] = useState("")
   const [flashMessage, setFlashMessage] = useState("")
   const [language, setLanguage] = useState<string>(() => {
@@ -701,6 +703,14 @@ export function TranscribePage() {
               >
                 <SettingsIcon className="size-5" />
               </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                title={t("transcribe.vadHelp.title")}
+                onClick={() => setShowVadHelp(true)}
+              >
+                <InfoIcon className="size-5" />
+              </Button>
             </div>
           </div>
         </CardHeader>
@@ -1112,6 +1122,77 @@ export function TranscribePage() {
               </Button>
               <Button onClick={handleApplySettings} disabled={settingsApplying}>
                 {settingsApplying ? t("transcribe.loadingModels") : t("transcribe.vadApply")}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── VAD Settings Help Modal ── */}
+      {showVadHelp && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowVadHelp(false)
+          }}
+        >
+          <div className="bg-background rounded-xl shadow-lg p-6 max-w-[480px] w-[90%] max-h-[80vh] overflow-y-auto">
+            <h3 className="text-lg font-semibold mb-1">{t("transcribe.vadHelp.title")}</h3>
+            <p className="text-xs text-muted-foreground mb-4">
+              {t("transcribe.vadHelp.intro")}
+            </p>
+
+            <div className="space-y-4 text-sm">
+              <div>
+                <p className="font-medium">
+                  {t("transcribe.vadThreshold")}{" "}
+                  <span className="text-xs text-muted-foreground">
+                    (0.0–1.0, {t("transcribe.vadHelp.default")}: 0.2)
+                  </span>
+                </p>
+                <p className="text-muted-foreground">{t("transcribe.vadHelp.threshold")}</p>
+              </div>
+              <div>
+                <p className="font-medium">
+                  {t("transcribe.vadMinSilence")}{" "}
+                  <span className="text-xs text-muted-foreground">
+                    ({t("transcribe.vadHelp.seconds")}, {t("transcribe.vadHelp.default")}: 0.2)
+                  </span>
+                </p>
+                <p className="text-muted-foreground">{t("transcribe.vadHelp.minSilence")}</p>
+              </div>
+              <div>
+                <p className="font-medium">
+                  {t("transcribe.vadMinSpeech")}{" "}
+                  <span className="text-xs text-muted-foreground">
+                    ({t("transcribe.vadHelp.seconds")}, {t("transcribe.vadHelp.default")}: 0.2)
+                  </span>
+                </p>
+                <p className="text-muted-foreground">{t("transcribe.vadHelp.minSpeech")}</p>
+              </div>
+              <div>
+                <p className="font-medium">
+                  {t("transcribe.vadMaxSpeech")}{" "}
+                  <span className="text-xs text-muted-foreground">
+                    ({t("transcribe.vadHelp.seconds")}, {t("transcribe.vadHelp.default")}: 10.0)
+                  </span>
+                </p>
+                <p className="text-muted-foreground">{t("transcribe.vadHelp.maxSpeech")}</p>
+              </div>
+              <div>
+                <p className="font-medium">
+                  {t("transcribe.vadThreads")}{" "}
+                  <span className="text-xs text-muted-foreground">
+                    (1–16, {t("transcribe.vadHelp.default")}: 2)
+                  </span>
+                </p>
+                <p className="text-muted-foreground">{t("transcribe.vadHelp.threads")}</p>
+              </div>
+            </div>
+
+            <div className="flex justify-end mt-6">
+              <Button onClick={() => setShowVadHelp(false)}>
+                {t("transcribe.vadHelp.close")}
               </Button>
             </div>
           </div>
